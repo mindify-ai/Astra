@@ -13,11 +13,11 @@
 
 ## Next
 
-1. **Auth and onboarding.** Make the Welcome buttons real: the GitHub/GitLab OAuth device flow, and repository
-   listing from the provider APIs instead of the seed.
+1. **Auth and onboarding.** Web sign-in through the GitHub/GitLab device flow is built (docs/PROTOCOL.md "Auth").
+   Next: list repositories from the provider APIs instead of the seed, and sign the desktop app in to a relay.
 2. **Push and PRs.** Push mission branches and open pull requests from Merge (GitHub/GitLab APIs) alongside the
    local merge.
-3. **Mobile notifications.** APNs/FCM push for *Needs you*, routed by the relay.
+3. **Mobile notifications.** APNs/FCM push for _Needs you_, routed by the relay.
 4. **Relay scale-out.** NATS fan-out between relay instances, per-workspace partitions, and op-log compaction
    into snapshots.
 5. **End-to-end encryption (optional).** Encrypt op bodies per workspace so the relay only routes ciphertext;
@@ -31,10 +31,10 @@
 
 ## Store readiness
 
-| Platform | Needs |
-|---|---|
-| macOS | Developer ID signing + notarization (secrets wired in `release.yml`) |
-| Windows | Authenticode certificate |
-| Linux | Done (deb, rpm, AppImage) |
-| iOS | Apple team id, provisioning, App Store review |
-| Android | Release keystore, Play listing |
+| Platform | Needs                                                                |
+| -------- | -------------------------------------------------------------------- |
+| macOS    | Developer ID signing + notarization (secrets wired in `release.yml`) |
+| Windows  | Authenticode certificate                                             |
+| Linux    | Done (deb, rpm, AppImage)                                            |
+| iOS      | Apple team id, provisioning, App Store review                        |
+| Android  | Release keystore, Play listing                                       |

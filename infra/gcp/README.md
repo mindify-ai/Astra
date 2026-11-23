@@ -25,18 +25,18 @@ Desktop and phone apps ship through the release workflow. Agents never run here:
 
 ## What it creates
 
-| File | Resources |
-|---|---|
-| `main.tf` | Required Google APIs |
-| `network.tf` | VPC, Cloud Run subnet, private services access for Cloud SQL |
-| `database.tf` | Cloud SQL Postgres 17: private IP, `ENCRYPTED_ONLY`, point-in-time recovery, 14 backups, optional HA |
-| `secrets.tf` | Secret Manager: database URL and JWT signing secret (generated) |
-| `registry.tf` | Artifact Registry for images, with a cleanup policy |
-| `relay.tf` | Cloud Run v2 service, its least-privilege service account, and health probes (`/readyz` startup, `/healthz` liveness) |
-| `web.tf` | Website bucket (SPA fallback to `index.html`), CDN backend bucket, security headers |
-| `lb.tf` | Global IP, managed certificate for both domains, URL map, Cloud Armor throttle, HTTP redirect |
-| `dns.tf` | A records, only when `dns_zone_name` is set |
-| `ci.tf` | Workload Identity pool for this repo and a deployer account scoped to the registry, this service, the web bucket and CDN invalidation |
+| File          | Resources                                                                                                                             |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `main.tf`     | Required Google APIs                                                                                                                  |
+| `network.tf`  | VPC, Cloud Run subnet, private services access for Cloud SQL                                                                          |
+| `database.tf` | Cloud SQL Postgres 17: private IP, `ENCRYPTED_ONLY`, point-in-time recovery, 14 backups, optional HA                                  |
+| `secrets.tf`  | Secret Manager: database URL and JWT signing secret (generated)                                                                       |
+| `registry.tf` | Artifact Registry for images, with a cleanup policy                                                                                   |
+| `relay.tf`    | Cloud Run v2 service, its least-privilege service account, and health probes (`/readyz` startup, `/healthz` liveness)                 |
+| `web.tf`      | Website bucket (SPA fallback to `index.html`), CDN backend bucket, security headers                                                   |
+| `lb.tf`       | Global IP, managed certificate for both domains, URL map, Cloud Armor throttle, HTTP redirect                                         |
+| `dns.tf`      | A records, only when `dns_zone_name` is set                                                                                           |
+| `ci.tf`       | Workload Identity pool for this repo and a deployer account scoped to the registry, this service, the web bucket and CDN invalidation |
 
 ## First deploy
 
@@ -71,10 +71,12 @@ terraform apply
 The first apply runs the relay with a placeholder image. The first CI deploy replaces it.
 
 **4. DNS.**
+
 - If you didn't set `dns_zone_name`, point `web_domain` and `sync_domain` A records at `terraform output load_balancer_ip`.
 - The managed certificate becomes active once DNS resolves. That usually takes 15–60 minutes.
 
 **5. GitHub variables.**
+
 - Copy each entry of `terraform output github_actions_variables` into the repository's Actions **variables**.
 - None of them are secrets, and no keys are involved.
 - Pushing to `main` then runs `.github/workflows/deploy-gcp.yml`, which builds and rolls out the relay and the web app.
@@ -103,7 +105,7 @@ The first apply runs the relay with a placeholder image. The first CI deploy rep
 ## Organisation-policy notes
 
 - The web bucket grants `allUsers` read access. It only serves the static app shell, and all data goes through the
-  relay. If *Domain restricted sharing* or *public access prevention* is enforced, exempt this bucket or serve
+  relay. If _Domain restricted sharing_ or _public access prevention_ is enforced, exempt this bucket or serve
   the app from Firebase Hosting instead.
 - The relay uses `invoker_iam_disabled`, so no `allUsers` IAM binding is needed. Every connection is
   authenticated by the relay's own JWT check, and ingress is limited to the load balancer.

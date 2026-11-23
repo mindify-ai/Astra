@@ -10,6 +10,8 @@ export interface RemoteOptions {
   workspaceId: string
   me: string
   nodeId: string
+  /** Called when the relay rejects the token (expired or revoked): the app should sign in again. */
+  onUnauthorized?: () => void
 }
 
 type ServerFrame =
@@ -121,6 +123,11 @@ export class RemoteClient extends Store {
     } else if (f.t === 'presence') {
       this.state = { ...this.state, presence: f.presence }
       this.emit()
+    } else if (f.t === 'error' && f.message === 'unauthorized') {
+      this.closed = true
+      this.ws?.close()
+      this.setConnectivity({ online: navigator.onLine, relay: 'disconnected' })
+      this.opts.onUnauthorized?.()
     }
   }
 

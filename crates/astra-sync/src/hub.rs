@@ -150,6 +150,28 @@ impl Hub {
         Arc::new(Hub { log, auth, inner: Mutex::new(Inner::default()), next: AtomicU64::new(1) })
     }
 
+    /// Append ops made by the server itself (e.g. a person entity on first sign-in) and fan them out.
+    pub async fn append_server_ops(&self, workspace: &str, ops: &[Op]) -> Result<Vec<(u64, Op)>> {
+        let lock = self.workspace_lock(workspace)?;
+        let _guard = lock.lock().await;
+        let stored = self.log.append(workspace, ops).await?;
+        self.fan_out(workspace, &stored)?;
+        Ok(stored)
+    }
+
+    fn fan_out(&self, ws: &str, stored: &[(u64, Op)]) -> Result<()> {
+        if let Some((cursor, _)) = stored.last() {
+            let frame = ServerFrame::Ops { ops: stored.iter().map(|(_, op)| op.clone()).collect(), cursor: *cursor };
+            let inner = self.lock()?;
+            for c in inner.conns.values() {
+                if c.live && c.workspace.as_deref() == Some(ws) {
+                    let _ = c.tx.send(frame.clone());
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// The op log.
     pub fn log(&self) -> &Arc<dyn OpLog> {
         &self.log
@@ -282,16 +304,7 @@ impl Hub {
                 let _guard = lock.lock().await;
                 let ids: Vec<String> = ops.iter().map(|o| o.id.clone()).collect();
                 let stored = self.log.append(&ws, &ops).await?;
-                if let Some((cursor, _)) = stored.last() {
-                    let frame =
-                        ServerFrame::Ops { ops: stored.iter().map(|(_, op)| op.clone()).collect(), cursor: *cursor };
-                    let inner = self.lock()?;
-                    for c in inner.conns.values() {
-                        if c.live && c.workspace.as_deref() == Some(ws.as_str()) {
-                            let _ = c.tx.send(frame.clone());
-                        }
-                    }
-                }
+                self.fan_out(&ws, &stored)?;
                 self.send(conn, ServerFrame::Ack { ids });
                 Ok(())
             }

@@ -34,7 +34,13 @@
     "category": "DeveloperTool",
     "shortDescription": "Every agent. One workspace.",
     "longDescription": "Run coding agents from any vendor or harness on the same repository, together with your team — locally or remotely, online or offline.",
-    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
     "macOS": { "minimumSystemVersion": "12.0" },
     "linux": { "deb": { "depends": [] } }
   }

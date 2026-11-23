@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths: ['crates/**', 'apps/web/**', 'packages/**', 'fixtures/**', 'Cargo.*', 'pnpm-lock.yaml']
+    paths: ["crates/**", "apps/web/**", "packages/**", "fixtures/**", "Cargo.*", "pnpm-lock.yaml"]
 
 concurrency:
   group: deploy-gcp

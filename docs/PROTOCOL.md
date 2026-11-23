@@ -117,3 +117,24 @@ after QR pairing.
 
 Clients reduce ops into `State` with the same rules in Rust and TypeScript. `fixtures/ops-conformance.json`
 holds shared cases that both implementations must pass.
+
+## Auth (relay HTTP API)
+
+JSON, camelCase. The relay proxies the GitHub/GitLab OAuth **device flow**, because the providers' device
+endpoints don't allow browser CORS. The provider's access token is used once to read the profile and then
+discarded.
+
+| Request                                                           | Response                                                                                                                                                                |
+| ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /v1/auth/device/start` `{provider: github\|gitlab}`         | `200 {deviceCode, userCode, verificationUri, verificationUriComplete: string\|null, interval, expiresIn}`; `503 {error: "notConfigured"}`; `400 {error: "badProvider"}` |
+| `POST /v1/auth/device/poll` `{provider, deviceCode}`              | `200 {status: "pending"}` \| `{status: "slowDown", interval}` \| `{status: "expired"}` \| `{status: "denied"}` \| `{status: "complete", session}`                       |
+| `POST /v1/auth/dev-token` `{name}` (only with `ASTRA_DEV_AUTH=1`) | `200 {session}`                                                                                                                                                         |
+| `GET /v1/me` (bearer token)                                       | `200 {person, workspaceId}`; `401 {error: "unauthorized"}`                                                                                                              |
+
+- `Session` = `{token, workspaceId, person: Person, expiresAt}`.
+- `token` is an HS256 JWT (`sub` = personId, `ws` = workspaceId, 30-day expiry).
+- On first sign-in the relay writes the person entity into the workspace op log.
+
+**Sync authentication.** The sync `hello` frame carries the token. An invalid or expired token, or a
+`workspaceId` that doesn't match the token's `ws` claim, gets `{t: "error", message: "unauthorized"}` and the
+socket is closed with code 4401. Clients then sign in again.

@@ -30,9 +30,15 @@ reqwest.workspace = true
 chrono.workspace = true
 clap.workspace = true
 url.workspace = true
+ulid.workspace = true
+
+[[bin]]
+name = "astra-server"
+path = "src/main.rs"
 
 [dev-dependencies]
 astra-store.workspace = true
+astra-node.workspace = true
 tokio-tungstenite.workspace = true
 tempfile.workspace = true
 

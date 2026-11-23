@@ -1,7 +1,7 @@
 # Astra architecture
 
 Astra is a multi-agent development environment by Mindify AI. You connect coding agents from any vendor or
-harness to a repository, give them one goal (a *mission*), split the work or race them, and steer and review
+harness to a repository, give them one goal (a _mission_), split the work or race them, and steer and review
 them with your team. It runs on:
 
 - the desktop (macOS, Windows, Linux),
@@ -14,7 +14,7 @@ It works remotely or fully locally, with or without internet.
 
 1. **Local first.** Every client reads from a local replica, so the UI never waits on the network. Changes are
    ops in an append-only log, and they sync when a connection exists.
-2. **Agents run where you put them.** Only *runner nodes* execute agents: the desktop app, or `astrad` on your own
+2. **Agents run where you put them.** Only _runner nodes_ execute agents: the desktop app, or `astrad` on your own
    server. API keys live in that machine's keychain. The SaaS backend never holds keys and never runs agents.
 3. **One UI, every platform.** One React app is mounted by the Tauri shell (desktop, iOS, Android) and by the
    web build. Layouts adapt per platform (title bars, phone chrome), but screens are shared.
@@ -36,32 +36,32 @@ It works remotely or fully locally, with or without internet.
    └─ Astra agent: Claude when online ⇄ Ollama / LM Studio / llama.cpp when offline
 ```
 
-| Mode | What runs where | Internet needed |
-|---|---|---|
-| **Local** | The desktop alone: agents, git, data. No account. | No (with local models) |
-| **Connected** | Desktop runner + relay, so phone, web and teammates join. | For remote clients |
+| Mode            | What runs where                                           | Internet needed                |
+| --------------- | --------------------------------------------------------- | ------------------------------ |
+| **Local**       | The desktop alone: agents, git, data. No account.         | No (with local models)         |
+| **Connected**   | Desktop runner + relay, so phone, web and teammates join. | For remote clients             |
 | **Your server** | `astrad` on a box you own runs agents; any client steers. | Between clients and the server |
-| **LAN** | Phone pairs directly with the desktop by QR code. | No |
+| **LAN**         | Phone pairs directly with the desktop by QR code.         | No                             |
 
 ## Repository
 
-| Path | What |
-|---|---|
-| `packages/tokens` | `tokens.json` (Mindify AI Frontier) → CSS variables, Tailwind v4 theme, TS constants. Self-hosted fonts. |
-| `packages/ui` | Design-system primitives: buttons, status, avatars, log well, diff view, window controls, phone chrome. |
-| `packages/client` | Protocol types, HLC/ULID, per-field LWW reducer, and the `AstraClient` implementations (Mock, Tauri, Remote). |
-| `packages/app` | Routes and screens: every artboard, desktop and phone. Depends only on `AstraClient`. |
-| `apps/web` | SaaS build: Vite, service-worker app shell, Playwright screenshot script. |
-| `apps/desktop` | Tauri 2 app. The same project builds desktop, iOS and Android; `src-tauri` embeds `astra-node`. |
-| `crates/astra-protocol` | Rust protocol types, reducer and HLC; exports TS types to `packages/client/src/generated`. |
-| `crates/astra-store` | SQLite (WAL) op log and projections. |
-| `crates/astra-sync` | Transport-agnostic sync engine: client state machine and server hub. |
-| `crates/astra-llm` | Model providers (Anthropic Messages API, OpenAI-compatible local servers) and the tool loop. |
-| `crates/astra-runtime` | Agent supervisor, adapters, worktrees, split/race orchestration, approvals and policies. |
-| `crates/astra-node` | Embeddable node used by the Tauri shell and `astrad`. |
-| `crates/astrad` | Headless runner and LAN host. |
-| `crates/astra-server` | Axum SaaS backend: sync relay, auth, presence, node routing. |
-| `fixtures/` | Seed workspace and the reducer conformance cases shared by Rust and TS. |
+| Path                    | What                                                                                                          |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `packages/tokens`       | `tokens.json` (Mindify AI Frontier) → CSS variables, Tailwind v4 theme, TS constants. Self-hosted fonts.      |
+| `packages/ui`           | Design-system primitives: buttons, status, avatars, log well, diff view, window controls, phone chrome.       |
+| `packages/client`       | Protocol types, HLC/ULID, per-field LWW reducer, and the `AstraClient` implementations (Mock, Tauri, Remote). |
+| `packages/app`          | Routes and screens: every artboard, desktop and phone. Depends only on `AstraClient`.                         |
+| `apps/web`              | SaaS build: Vite, service-worker app shell, Playwright screenshot script.                                     |
+| `apps/desktop`          | Tauri 2 app. The same project builds desktop, iOS and Android; `src-tauri` embeds `astra-node`.               |
+| `crates/astra-protocol` | Rust protocol types, reducer and HLC; exports TS types to `packages/client/src/generated`.                    |
+| `crates/astra-store`    | SQLite (WAL) op log and projections.                                                                          |
+| `crates/astra-sync`     | Transport-agnostic sync engine: client state machine and server hub.                                          |
+| `crates/astra-llm`      | Model providers (Anthropic Messages API, OpenAI-compatible local servers) and the tool loop.                  |
+| `crates/astra-runtime`  | Agent supervisor, adapters, worktrees, split/race orchestration, approvals and policies.                      |
+| `crates/astra-node`     | Embeddable node used by the Tauri shell and `astrad`.                                                         |
+| `crates/astrad`         | Headless runner and LAN host.                                                                                 |
+| `crates/astra-server`   | Axum SaaS backend: sync relay, auth, presence, node routing.                                                  |
+| `fixtures/`             | Seed workspace and the reducer conformance cases shared by Rust and TS.                                       |
 
 ## Data and sync
 
@@ -69,7 +69,7 @@ It works remotely or fully locally, with or without internet.
   - `put`, `patch` and `delete` change entities;
   - `command` asks a runner node to do something;
   - `commandResult` records what happened.
-- **Merging.** Scalar fields are last-writer-wins *per field* by hybrid logical clock. Threads and logs are
+- **Merging.** Scalar fields are last-writer-wins _per field_ by hybrid logical clock. Threads and logs are
   append-only entities, so there are no merge conflicts. Rust and TypeScript implement the same reducer, and
   `fixtures/ops-conformance.json` keeps them identical.
 - **Commands run exactly once.** Side effects (approve, steer, merge, start) are ops addressed to the owning node.
@@ -95,10 +95,10 @@ It works remotely or fully locally, with or without internet.
   - Race entrants get `-a`, `-b`, and so on.
   - Losing branches are kept after a merge.
 - **Orchestration.**
-  - *Split*: the planner writes a plan, then tasks go to builders, testers and reviewers.
-  - *Race*: every builder attempts the goal in parallel, a reviewer compares the results, and a person merges one.
+  - _Split_: the planner writes a plan, then tasks go to builders, testers and reviewers.
+  - _Race_: every builder attempts the goal in parallel, a reviewer compares the results, and a person merges one.
 - **Policies.**
-  - Per agent: *Ask me*, *Ask anyone who can steer*, or *Run without asking*.
+  - Per agent: _Ask me_, _Ask anyone who can steer_, or _Run without asking_.
   - Per mission: who may approve.
   - Commands outside the worktree always ask.
   - One person steers an agent at a time.
@@ -106,8 +106,8 @@ It works remotely or fully locally, with or without internet.
   - Online, it calls the Anthropic Messages API over raw HTTP, because there is no official Rust SDK. It uses
     `claude-opus-5-5` with adaptive thinking, streaming, prompt caching and server-side fallbacks.
   - Offline, it detects Ollama, LM Studio or llama.cpp.
-  - Routing is *Auto*, *Cloud only* or *Local only*.
-  - Agents that need the network show *Offline*, and their roles can be handed to the local agent.
+  - Routing is _Auto_, _Cloud only_ or _Local only_.
+  - Agents that need the network show _Offline_, and their roles can be handed to the local agent.
 
 ## Performance
 

@@ -18,7 +18,7 @@ import {
 } from '@astra/ui'
 import { useRouter } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
-import { useAstraState, useClient, usePlatform, useUi } from '../context'
+import { useAstraState, useClient, useHost, usePlatform, useUi } from '../context'
 import { useMissionPresence } from '../screens/common'
 import { useNeedsYou } from '../screens/Home'
 import { checksStatus, resultsOf, useVerdict } from '../screens/Review'
@@ -357,6 +357,7 @@ export function MobileAgents() {
 
 export function MobilePeople() {
   const s = useAstraState()
+  const host = useHost()
   const missions = orderedMissions(s).slice(0, 5)
   return (
     <MobileFrame
@@ -383,6 +384,11 @@ export function MobilePeople() {
           </ul>
         </section>
       ))}
+      {host.signOut ? (
+        <Button variant="outline" size="touch" className="self-start" onClick={host.signOut}>
+          Sign out
+        </Button>
+      ) : null}
     </MobileFrame>
   )
 }

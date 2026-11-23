@@ -85,6 +85,8 @@ export interface HostCapabilities {
   pickFolder?: () => Promise<string | null>
   /** Copies text to the clipboard. */
   copy?: (text: string) => Promise<void>
+  /** Ends the session (web, signed in to a relay). */
+  signOut?: () => void
 }
 
 const HostContext = createContext<HostCapabilities>({})

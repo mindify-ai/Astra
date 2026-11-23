@@ -45,5 +45,6 @@ client.ready
     // The Rust core failed to start (corrupt data dir, permissions). Show why instead of a blank window.
     const el = document.getElementById('root')!
     el.textContent = `Astra could not start its local node: ${String(err)}`
-    el.style.cssText = 'padding:48px;font:14px/22px Barlow,system-ui;color:#F97066;background:#000;min-height:100vh'
+    el.style.cssText =
+      'padding:48px;font:14px/22px Barlow,system-ui;color:#F97066;background:#000;min-height:100vh'
   })

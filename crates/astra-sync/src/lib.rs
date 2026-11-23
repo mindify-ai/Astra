@@ -25,7 +25,9 @@ pub enum SyncError {
     Codec(String),
     #[error("server: {0}")]
     Server(String),
-    #[error("unauthorized: {0}")]
+    /// Authentication failed. Displays exactly `unauthorized` (clients treat it as "sign in again");
+    /// the reason is for server logs only.
+    #[error("unauthorized")]
     Unauthorized(String),
     #[error("protocol: {0}")]
     Protocol(String),

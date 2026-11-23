@@ -42,16 +42,30 @@ pnpm test && cargo test --workspace
 
 Append `?platform=mac|windows|linux|ios|android` to a web URL to preview another platform's chrome.
 
+### Web sign-in
+
+The web app signs in with GitHub (or GitLab) through the relay's OAuth device flow. It shows a code, you approve
+it on GitHub, and no password or GitHub token ever reaches the browser.
+
+| Variable (build time)   | Effect                                                                                             |
+| ----------------------- | -------------------------------------------------------------------------------------------------- |
+| `VITE_ASTRA_RELAY_URL`  | Relay base URL, e.g. `https://sync.example.com`. Unset: the in-browser demo workspace, no sign-in. |
+| `VITE_ASTRA_DEV_AUTH=1` | Also shows a developer sign-in form (relay started with `ASTRA_DEV_AUTH=1`).                       |
+
+- The relay needs `GITHUB_CLIENT_ID` from a GitHub OAuth app with **device flow enabled**. With Terraform this is
+  `github_oauth_client_id`.
+- Add `?signin` to the demo URL to try the sign-in screen without a relay.
+
 ## Layout
 
-| Path | What |
-|---|---|
-| `apps/web` | Web SaaS (Vite, offline app shell) |
-| `apps/desktop` | Tauri 2 app: desktop, iOS and Android |
-| `packages/tokens` · `ui` · `client` · `app` | Design tokens, UI primitives, sync client, screens |
-| `crates/*` | Rust core: protocol, store, sync, runtime, LLM providers, node, `astrad`, `astra-server` |
-| `infra/gcp` | Terraform for Google Cloud: Cloud Run relay, Cloud SQL, CDN-hosted web app, keyless CI deploys |
-| `fixtures/` | Demo workspace and reducer conformance cases shared by Rust and TypeScript |
+| Path                                        | What                                                                                           |
+| ------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `apps/web`                                  | Web SaaS (Vite, offline app shell)                                                             |
+| `apps/desktop`                              | Tauri 2 app: desktop, iOS and Android                                                          |
+| `packages/tokens` · `ui` · `client` · `app` | Design tokens, UI primitives, sync client, screens                                             |
+| `crates/*`                                  | Rust core: protocol, store, sync, runtime, LLM providers, node, `astrad`, `astra-server`       |
+| `infra/gcp`                                 | Terraform for Google Cloud: Cloud Run relay, Cloud SQL, CDN-hosted web app, keyless CI deploys |
+| `fixtures/`                                 | Demo workspace and reducer conformance cases shared by Rust and TypeScript                     |
 
 ## Phones
 

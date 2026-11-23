@@ -8,3 +8,4 @@ export {
   usePlatform,
 } from './context'
 export { createAstraRouter } from './router'
+export { SignIn, type SignInProps } from './screens/SignIn'

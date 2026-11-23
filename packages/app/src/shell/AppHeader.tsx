@@ -2,7 +2,7 @@ import type { Person } from '@astra/client'
 import { AvatarStack, buttonClass, cx, LogoMark, Select, Spec, WindowControls } from '@astra/ui'
 import { Link } from '@tanstack/react-router'
 import { type ReactNode, useEffect, useRef, useState } from 'react'
-import { useAstraState, useConnectivity, usePlatform, useUi } from '../context'
+import { useAstraState, useConnectivity, useHost, usePlatform, useUi } from '../context'
 import { currentMissionId } from '../select'
 
 export type View = 'thread' | 'map' | 'board'
@@ -25,6 +25,7 @@ const navLink =
   'flex h-14 box-border items-center border-y-2 border-transparent text-label uppercase no-underline'
 
 function AppMenu() {
+  const host = useHost()
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -68,6 +69,19 @@ function AppMenu() {
           <Link role="menuitem" to="/setup/repo" className={item} onClick={() => setOpen(false)}>
             Repositories
           </Link>
+          {host.signOut ? (
+            <button
+              type="button"
+              role="menuitem"
+              className={`${item} w-full border-0 border-t border-line bg-transparent text-left`}
+              onClick={() => {
+                setOpen(false)
+                host.signOut?.()
+              }}
+            >
+              Sign out
+            </button>
+          ) : null}
         </div>
       ) : null}
     </div>
@@ -75,7 +89,7 @@ function AppMenu() {
 }
 
 export function AppHeader({ repoSelect, nav, step, byline, people, actions, border = true }: AppHeaderProps) {
-  const { windowControls, windowActions } = usePlatform()
+  const { windowControls, windowActions, platform } = usePlatform()
   const state = useAstraState()
   const ui = useUi()
   const online = useConnectivity().online
@@ -120,8 +134,8 @@ export function AppHeader({ repoSelect, nav, step, byline, people, actions, bord
     )
   }
 
-  // macOS keeps menus in the system menu bar; Windows and Linux open them from the Astra mark.
-  const menuFromMark = windowControls === 'windows' || windowControls === 'linux'
+  // macOS keeps menus in the system menu bar; Windows, Linux and the web open them from the Astra mark.
+  const menuFromMark = windowControls === 'windows' || windowControls === 'linux' || platform === 'web'
 
   return (
     <header

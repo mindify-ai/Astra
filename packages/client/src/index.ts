@@ -1,4 +1,5 @@
 export * from './actions'
+export * from './auth'
 export * from './hlc'
 export { MockClient, type MockOptions } from './mock'
 export * from './reducer'
