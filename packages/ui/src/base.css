@@ -1,0 +1,52 @@
+/* Page basics shared by every Astra surface. Imported after tailwindcss + the token theme. */
+@layer base {
+  html,
+  body {
+    background: var(--surface);
+    color: var(--ink);
+  }
+  body {
+    margin: 0;
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 22px;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+  a {
+    color: var(--ink);
+  }
+  a:hover {
+    color: var(--invert);
+  }
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+    color: inherit;
+  }
+  button {
+    cursor: pointer;
+  }
+  :focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+  }
+  input[type="radio"],
+  input[type="checkbox"] {
+    accent-color: var(--signal);
+  }
+  ::placeholder {
+    color: var(--ink-muted);
+    opacity: 1;
+  }
+  pre {
+    margin: 0;
+  }
+  [data-tauri-drag-region] {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+}
