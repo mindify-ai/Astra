@@ -1,0 +1,76 @@
+name: Deploy to GCP
+
+# Builds the relay image and the web app, then rolls them out. Infrastructure itself is Terraform
+# (infra/gcp); its `github_actions_variables` output lists the repository variables used here.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['crates/**', 'apps/web/**', 'packages/**', 'fixtures/**', 'Cargo.*', 'pnpm-lock.yaml']
+
+concurrency:
+  group: deploy-gcp
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write # keyless auth through Workload Identity Federation
+
+jobs:
+  relay:
+    name: Relay → Cloud Run
+    runs-on: ubuntu-latest
+    if: vars.GCP_PROJECT_ID != ''
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SA }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - run: gcloud auth configure-docker "${{ vars.GCP_REGION }}-docker.pkg.dev" --quiet
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: crates/astra-server/Dockerfile
+          push: true
+          tags: ${{ vars.GCP_IMAGE_REPO }}/astra-server:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Roll out
+        run: |
+          gcloud run deploy "${{ vars.GCP_RELAY }}" \
+            --image "${{ vars.GCP_IMAGE_REPO }}/astra-server:${{ github.sha }}" \
+            --region "${{ vars.GCP_REGION }}" --project "${{ vars.GCP_PROJECT_ID }}" --quiet
+
+  web:
+    name: Web → Cloud Storage + CDN
+    runs-on: ubuntu-latest
+    if: vars.GCP_PROJECT_ID != ''
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @astra/web build
+        env:
+          VITE_ASTRA_RELAY_URL: ${{ vars.ASTRA_RELAY_URL }}
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SA }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Upload
+        working-directory: apps/web/dist
+        run: |
+          bucket="gs://${{ vars.GCP_WEB_BUCKET }}"
+          # Hashed assets are immutable; the shell, service worker and manifest must always revalidate.
+          gcloud storage rsync . "$bucket" --recursive --delete-unmatched-destination-objects \
+            --cache-control="public, max-age=31536000, immutable"
+          for f in index.html sw.js manifest.webmanifest icon.svg; do
+            gcloud storage objects update "$bucket/$f" --cache-control="no-cache"
+          done
+      - name: Invalidate CDN
+        run: gcloud compute url-maps invalidate-cdn-cache "${{ vars.GCP_URL_MAP }}" --path "/*" --async --project "${{ vars.GCP_PROJECT_ID }}"

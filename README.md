@@ -50,6 +50,7 @@ Append `?platform=mac|windows|linux|ios|android` to a web URL to preview another
 | `apps/desktop` | Tauri 2 app: desktop, iOS and Android |
 | `packages/tokens` · `ui` · `client` · `app` | Design tokens, UI primitives, sync client, screens |
 | `crates/*` | Rust core: protocol, store, sync, runtime, LLM providers, node, `astrad`, `astra-server` |
+| `infra/gcp` | Terraform for Google Cloud: Cloud Run relay, Cloud SQL, CDN-hosted web app, keyless CI deploys |
 | `fixtures/` | Demo workspace and reducer conformance cases shared by Rust and TypeScript |
 
 ## Phones

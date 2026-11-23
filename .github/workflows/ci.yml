@@ -70,3 +70,17 @@ jobs:
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile && pnpm --filter @astra/desktop build
       - run: cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml -- -D warnings
+
+  infra:
+    name: Terraform (GCP)
+    runs-on: ubuntu-latest
+    defaults:
+      run: { working-directory: infra/gcp }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with: { terraform_version: 1.17.2 }
+      - run: terraform fmt -check -recursive
+      - run: terraform init -backend=false -input=false
+      - run: terraform validate
+      - run: terraform test
