@@ -56,17 +56,50 @@ pub struct State {
 macro_rules! dispatch {
     ($self:ident, $kind:expr, |$map:ident| $body:expr) => {
         match $kind {
-            EntityKind::Person => { let $map = &$self.people; $body }
-            EntityKind::Repository => { let $map = &$self.repositories; $body }
-            EntityKind::Agent => { let $map = &$self.agents; $body }
-            EntityKind::Mission => { let $map = &$self.missions; $body }
-            EntityKind::MissionAgent => { let $map = &$self.mission_agents; $body }
-            EntityKind::Task => { let $map = &$self.tasks; $body }
-            EntityKind::Message => { let $map = &$self.messages; $body }
-            EntityKind::Approval => { let $map = &$self.approvals; $body }
-            EntityKind::Result => { let $map = &$self.results; $body }
-            EntityKind::Merge => { let $map = &$self.merges; $body }
-            EntityKind::Membership => { let $map = &$self.memberships; $body }
+            EntityKind::Person => {
+                let $map = &$self.people;
+                $body
+            }
+            EntityKind::Repository => {
+                let $map = &$self.repositories;
+                $body
+            }
+            EntityKind::Agent => {
+                let $map = &$self.agents;
+                $body
+            }
+            EntityKind::Mission => {
+                let $map = &$self.missions;
+                $body
+            }
+            EntityKind::MissionAgent => {
+                let $map = &$self.mission_agents;
+                $body
+            }
+            EntityKind::Task => {
+                let $map = &$self.tasks;
+                $body
+            }
+            EntityKind::Message => {
+                let $map = &$self.messages;
+                $body
+            }
+            EntityKind::Approval => {
+                let $map = &$self.approvals;
+                $body
+            }
+            EntityKind::Result => {
+                let $map = &$self.results;
+                $body
+            }
+            EntityKind::Merge => {
+                let $map = &$self.merges;
+                $body
+            }
+            EntityKind::Membership => {
+                let $map = &$self.memberships;
+                $body
+            }
         }
     };
 }
@@ -74,17 +107,50 @@ macro_rules! dispatch {
 macro_rules! dispatch_mut {
     ($self:ident, $kind:expr, |$map:ident| $body:expr) => {
         match $kind {
-            EntityKind::Person => { let $map = &mut $self.people; $body }
-            EntityKind::Repository => { let $map = &mut $self.repositories; $body }
-            EntityKind::Agent => { let $map = &mut $self.agents; $body }
-            EntityKind::Mission => { let $map = &mut $self.missions; $body }
-            EntityKind::MissionAgent => { let $map = &mut $self.mission_agents; $body }
-            EntityKind::Task => { let $map = &mut $self.tasks; $body }
-            EntityKind::Message => { let $map = &mut $self.messages; $body }
-            EntityKind::Approval => { let $map = &mut $self.approvals; $body }
-            EntityKind::Result => { let $map = &mut $self.results; $body }
-            EntityKind::Merge => { let $map = &mut $self.merges; $body }
-            EntityKind::Membership => { let $map = &mut $self.memberships; $body }
+            EntityKind::Person => {
+                let $map = &mut $self.people;
+                $body
+            }
+            EntityKind::Repository => {
+                let $map = &mut $self.repositories;
+                $body
+            }
+            EntityKind::Agent => {
+                let $map = &mut $self.agents;
+                $body
+            }
+            EntityKind::Mission => {
+                let $map = &mut $self.missions;
+                $body
+            }
+            EntityKind::MissionAgent => {
+                let $map = &mut $self.mission_agents;
+                $body
+            }
+            EntityKind::Task => {
+                let $map = &mut $self.tasks;
+                $body
+            }
+            EntityKind::Message => {
+                let $map = &mut $self.messages;
+                $body
+            }
+            EntityKind::Approval => {
+                let $map = &mut $self.approvals;
+                $body
+            }
+            EntityKind::Result => {
+                let $map = &mut $self.results;
+                $body
+            }
+            EntityKind::Merge => {
+                let $map = &mut $self.merges;
+                $body
+            }
+            EntityKind::Membership => {
+                let $map = &mut $self.memberships;
+                $body
+            }
         }
     };
 }
@@ -92,7 +158,11 @@ macro_rules! dispatch_mut {
 impl State {
     /// An empty state.
     pub fn new(workspace_id: impl Into<String>, me: impl Into<String>) -> State {
-        State { workspace_id: workspace_id.into(), me: me.into(), ..State::default() }
+        State {
+            workspace_id: workspace_id.into(),
+            me: me.into(),
+            ..State::default()
+        }
     }
 
     /// Whether an entity exists.
@@ -108,17 +178,39 @@ impl State {
     /// Insert or replace an entity.
     pub fn insert(&mut self, entity: Entity) {
         match entity {
-            Entity::Person(e) => { self.people.insert(e.id.clone(), e); }
-            Entity::Repository(e) => { self.repositories.insert(e.id.clone(), e); }
-            Entity::Agent(e) => { self.agents.insert(e.id.clone(), e); }
-            Entity::Mission(e) => { self.missions.insert(e.id.clone(), e); }
-            Entity::MissionAgent(e) => { self.mission_agents.insert(e.id.clone(), e); }
-            Entity::Task(e) => { self.tasks.insert(e.id.clone(), e); }
-            Entity::Message(e) => { self.messages.insert(e.id.clone(), e); }
-            Entity::Approval(e) => { self.approvals.insert(e.id.clone(), e); }
-            Entity::Result(e) => { self.results.insert(e.id.clone(), e); }
-            Entity::Merge(e) => { self.merges.insert(e.id.clone(), e); }
-            Entity::Membership(e) => { self.memberships.insert(e.id.clone(), e); }
+            Entity::Person(e) => {
+                self.people.insert(e.id.clone(), e);
+            }
+            Entity::Repository(e) => {
+                self.repositories.insert(e.id.clone(), e);
+            }
+            Entity::Agent(e) => {
+                self.agents.insert(e.id.clone(), e);
+            }
+            Entity::Mission(e) => {
+                self.missions.insert(e.id.clone(), e);
+            }
+            Entity::MissionAgent(e) => {
+                self.mission_agents.insert(e.id.clone(), e);
+            }
+            Entity::Task(e) => {
+                self.tasks.insert(e.id.clone(), e);
+            }
+            Entity::Message(e) => {
+                self.messages.insert(e.id.clone(), e);
+            }
+            Entity::Approval(e) => {
+                self.approvals.insert(e.id.clone(), e);
+            }
+            Entity::Result(e) => {
+                self.results.insert(e.id.clone(), e);
+            }
+            Entity::Merge(e) => {
+                self.merges.insert(e.id.clone(), e);
+            }
+            Entity::Membership(e) => {
+                self.memberships.insert(e.id.clone(), e);
+            }
         }
     }
 
@@ -131,14 +223,18 @@ impl State {
     pub fn entities(&self) -> Vec<Entity> {
         let mut out = Vec::new();
         for kind in EntityKind::ALL {
-            dispatch!(self, kind, |m| out.extend(m.values().cloned().map(Into::into)));
+            dispatch!(self, kind, |m| out
+                .extend(m.values().cloned().map(Into::into)));
         }
         out
     }
 
     /// Number of entities of all kinds.
     pub fn len(&self) -> usize {
-        EntityKind::ALL.iter().map(|k| dispatch!(self, *k, |m| m.len())).sum()
+        EntityKind::ALL
+            .iter()
+            .map(|k| dispatch!(self, *k, |m| m.len()))
+            .sum()
     }
 
     /// True when there are no entities.

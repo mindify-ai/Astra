@@ -26,7 +26,10 @@ pub struct LocalServer {
 }
 
 /// Probe `GET {base}/models` on each candidate with a short timeout. Returns reachable servers in order.
-pub async fn detect_servers(candidates: &[(String, String)], timeout: Duration) -> Vec<LocalServer> {
+pub async fn detect_servers(
+    candidates: &[(String, String)],
+    timeout: Duration,
+) -> Vec<LocalServer> {
     let http = match reqwest::Client::builder().timeout(timeout).build() {
         Ok(h) => h,
         Err(_) => return vec![],
@@ -42,17 +45,32 @@ pub async fn detect_servers(candidates: &[(String, String)], timeout: Duration) 
             let v: Value = resp.json().await.ok()?;
             let models = v["data"]
                 .as_array()
-                .map(|a| a.iter().filter_map(|m| m["id"].as_str().map(str::to_string)).collect())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|m| m["id"].as_str().map(str::to_string))
+                        .collect()
+                })
                 .unwrap_or_default();
-            Some(LocalServer { kind: kind.clone(), base_url: base.clone(), models })
+            Some(LocalServer {
+                kind: kind.clone(),
+                base_url: base.clone(),
+                models,
+            })
         }
     });
-    futures::future::join_all(probes).await.into_iter().flatten().collect()
+    futures::future::join_all(probes)
+        .await
+        .into_iter()
+        .flatten()
+        .collect()
 }
 
 /// [`detect_servers`] over the well-known local ports (400 ms timeout each, probed concurrently).
 pub async fn detect_local_servers() -> Vec<LocalServer> {
-    let c: Vec<(String, String)> = LOCAL_CANDIDATES.iter().map(|(k, b)| (k.to_string(), b.to_string())).collect();
+    let c: Vec<(String, String)> = LOCAL_CANDIDATES
+        .iter()
+        .map(|(k, b)| (k.to_string(), b.to_string()))
+        .collect();
     detect_servers(&c, Duration::from_millis(400)).await
 }
 
@@ -68,13 +86,19 @@ pub struct OpenAiCompatProvider {
 
 impl OpenAiCompatProvider {
     /// A provider for `base_url` (including `/v1`) and `model`.
-    pub fn new(kind: impl Into<String>, base_url: impl Into<String>, model: impl Into<String>) -> Result<Self> {
+    pub fn new(
+        kind: impl Into<String>,
+        base_url: impl Into<String>,
+        model: impl Into<String>,
+    ) -> Result<Self> {
         Ok(OpenAiCompatProvider {
             base_url: base_url.into(),
             model: model.into(),
             kind: kind.into(),
             api_key: None,
-            http: reqwest::Client::builder().connect_timeout(Duration::from_secs(5)).build()?,
+            http: reqwest::Client::builder()
+                .connect_timeout(Duration::from_secs(5))
+                .build()?,
         })
     }
 
@@ -87,9 +111,16 @@ impl OpenAiCompatProvider {
                     let mut text = Vec::new();
                     for b in &m.blocks {
                         match b {
-                            Block::ToolResult { tool_use_id, content, is_error } => {
-                                let content =
-                                    if *is_error { format!("ERROR: {content}") } else { content.clone() };
+                            Block::ToolResult {
+                                tool_use_id,
+                                content,
+                                is_error,
+                            } => {
+                                let content = if *is_error {
+                                    format!("ERROR: {content}")
+                                } else {
+                                    content.clone()
+                                };
                                 messages.push(json!({"role": "tool", "tool_call_id": tool_use_id, "content": content}));
                             }
                             Block::Text { text: t } => text.push(t.clone()),
@@ -150,7 +181,11 @@ impl Provider for OpenAiCompatProvider {
         format!("{}:{}", self.kind, self.model)
     }
 
-    async fn turn(&self, req: TurnRequest<'_>, on_event: &(dyn Fn(StreamEvent) + Send + Sync)) -> Result<TurnResponse> {
+    async fn turn(
+        &self,
+        req: TurnRequest<'_>,
+        on_event: &(dyn Fn(StreamEvent) + Send + Sync),
+    ) -> Result<TurnResponse> {
         let url = format!("{}/chat/completions", self.base_url.trim_end_matches('/'));
         let mut r = self.http.post(url).json(&self.request_body(&req));
         if let Some(k) = &self.api_key {
@@ -159,7 +194,10 @@ impl Provider for OpenAiCompatProvider {
         let resp = r.send().await?;
         if !resp.status().is_success() {
             let status = resp.status().as_u16();
-            return Err(LlmError::Api { status, message: resp.text().await.unwrap_or_default() });
+            return Err(LlmError::Api {
+                status,
+                message: resp.text().await.unwrap_or_default(),
+            });
         }
         let mut stream = resp.bytes_stream();
         let mut parser = SseParser::new();
@@ -175,11 +213,11 @@ impl Provider for OpenAiCompatProvider {
                 return Err(LlmError::Stream(err.to_string()));
             }
             let choice = &v["choices"][0];
-            if let Some(t) = choice["delta"]["content"].as_str() {
-                if !t.is_empty() {
-                    text.push_str(t);
-                    on_event(StreamEvent::TextDelta(t.to_string()));
-                }
+            if let Some(t) = choice["delta"]["content"].as_str()
+                && !t.is_empty()
+            {
+                text.push_str(t);
+                on_event(StreamEvent::TextDelta(t.to_string()));
             }
             if let Some(tc) = choice["delta"]["tool_calls"].as_array() {
                 for c in tc {
@@ -194,7 +232,9 @@ impl Provider for OpenAiCompatProvider {
                     if let Some(a) = c["function"]["arguments"].as_str() {
                         acc.args.push_str(a);
                     }
-                    on_event(StreamEvent::ToolInputDelta { index: index as usize });
+                    on_event(StreamEvent::ToolInputDelta {
+                        index: index as usize,
+                    });
                 }
             }
             if let Some(f) = choice["finish_reason"].as_str() {
@@ -216,7 +256,11 @@ impl Provider for OpenAiCompatProvider {
         }
         let mut tool_calls = Vec::new();
         for (i, c) in calls {
-            let id = if c.id.is_empty() { format!("call_{i}") } else { c.id };
+            let id = if c.id.is_empty() {
+                format!("call_{i}")
+            } else {
+                c.id
+            };
             let parsed = if c.args.trim().is_empty() {
                 Ok(json!({}))
             } else {
@@ -226,8 +270,16 @@ impl Provider for OpenAiCompatProvider {
                 Ok(v) if v.is_object() => v.clone(),
                 _ => json!({}),
             };
-            blocks.push(Block::ToolUse { id: id.clone(), name: c.name.clone(), input });
-            tool_calls.push(ToolCall { id, name: c.name, input: parsed });
+            blocks.push(Block::ToolUse {
+                id: id.clone(),
+                name: c.name.clone(),
+                input,
+            });
+            tool_calls.push(ToolCall {
+                id,
+                name: c.name,
+                input: parsed,
+            });
         }
         let stop_reason = match finish.as_deref() {
             Some("length") => StopReason::MaxTokens,
@@ -237,7 +289,11 @@ impl Provider for OpenAiCompatProvider {
             _ => StopReason::EndTurn,
         };
         Ok(TurnResponse {
-            message: ChatMessage { role: ChatRole::Assistant, blocks, raw: None },
+            message: ChatMessage {
+                role: ChatRole::Assistant,
+                blocks,
+                raw: None,
+            },
             stop_reason,
             tool_calls,
             refusal: None,

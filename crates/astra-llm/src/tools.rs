@@ -22,7 +22,9 @@ pub struct Workspace {
 impl Workspace {
     /// A workspace rooted at `root` (must exist).
     pub fn new(root: impl AsRef<Path>) -> std::io::Result<Self> {
-        Ok(Workspace { root: root.as_ref().canonicalize()? })
+        Ok(Workspace {
+            root: root.as_ref().canonicalize()?,
+        })
     }
 
     /// The canonical root.
@@ -34,7 +36,11 @@ impl Workspace {
     /// including through symlinks.
     pub fn resolve(&self, path: &str) -> Result<PathBuf, String> {
         let p = Path::new(path);
-        let joined = if p.is_absolute() { p.to_path_buf() } else { self.root.join(p) };
+        let joined = if p.is_absolute() {
+            p.to_path_buf()
+        } else {
+            self.root.join(p)
+        };
         let mut normal = PathBuf::new();
         for c in joined.components() {
             match c {
@@ -58,7 +64,9 @@ impl Workspace {
                 None => break,
             };
         }
-        let real = existing.canonicalize().map_err(|e| format!("{path}: {e}"))?;
+        let real = existing
+            .canonicalize()
+            .map_err(|e| format!("{path}: {e}"))?;
         if !real.starts_with(&self.root) {
             return Err(format!("path escapes the workspace: {path}"));
         }
@@ -67,7 +75,10 @@ impl Workspace {
 
     /// Path relative to the root, for display.
     pub fn display(&self, p: &Path) -> String {
-        p.strip_prefix(&self.root).unwrap_or(p).to_string_lossy().into_owned()
+        p.strip_prefix(&self.root)
+            .unwrap_or(p)
+            .to_string_lossy()
+            .into_owned()
     }
 }
 
@@ -109,10 +120,18 @@ pub struct ToolOutcome {
 
 impl ToolOutcome {
     fn ok(content: impl Into<String>, verb: &str, target: impl Into<String>) -> Self {
-        ToolOutcome { content: content.into(), is_error: false, log: Some((verb.into(), target.into())) }
+        ToolOutcome {
+            content: content.into(),
+            is_error: false,
+            log: Some((verb.into(), target.into())),
+        }
     }
     fn err(content: impl Into<String>) -> Self {
-        ToolOutcome { content: content.into(), is_error: true, log: None }
+        ToolOutcome {
+            content: content.into(),
+            is_error: true,
+            log: None,
+        }
     }
 }
 
@@ -131,7 +150,11 @@ fn schema(props: Value, required: &[&str]) -> Value {
 impl Toolset {
     /// Tools over `workspace`, asking `approver` before commands.
     pub fn new(workspace: Workspace, approver: Arc<dyn CommandApprover>) -> Self {
-        Toolset { workspace, approver, command_timeout: Duration::from_secs(300) }
+        Toolset {
+            workspace,
+            approver,
+            command_timeout: Duration::from_secs(300),
+        }
     }
 
     /// Tool definitions, in a fixed order (stable for prompt caching).
@@ -190,7 +213,9 @@ impl Toolset {
         let str_arg = |k: &str| input.get(k).and_then(Value::as_str);
         match name {
             "read_file" => {
-                let Some(path) = str_arg("path") else { return ToolOutcome::err("missing path") };
+                let Some(path) = str_arg("path") else {
+                    return ToolOutcome::err("missing path");
+                };
                 match self.workspace.resolve(path) {
                     Err(e) => ToolOutcome::err(e),
                     Ok(p) => match tokio::fs::read(&p).await {
@@ -213,21 +238,28 @@ impl Toolset {
                 match self.workspace.resolve(path) {
                     Err(e) => ToolOutcome::err(e),
                     Ok(p) => {
-                        if let Some(dir) = p.parent() {
-                            if let Err(e) = tokio::fs::create_dir_all(dir).await {
-                                return ToolOutcome::err(format!("{path}: {e}"));
-                            }
+                        if let Some(dir) = p.parent()
+                            && let Err(e) = tokio::fs::create_dir_all(dir).await
+                        {
+                            return ToolOutcome::err(format!("{path}: {e}"));
                         }
                         match tokio::fs::write(&p, content).await {
-                            Ok(()) => ToolOutcome::ok(format!("wrote {} bytes", content.len()), "edit", self.workspace.display(&p)),
+                            Ok(()) => ToolOutcome::ok(
+                                format!("wrote {} bytes", content.len()),
+                                "edit",
+                                self.workspace.display(&p),
+                            ),
                             Err(e) => ToolOutcome::err(format!("{path}: {e}")),
                         }
                     }
                 }
             }
             "edit_file" => {
-                let (Some(path), Some(old), Some(new)) = (str_arg("path"), str_arg("old_string"), str_arg("new_string"))
-                else {
+                let (Some(path), Some(old), Some(new)) = (
+                    str_arg("path"),
+                    str_arg("old_string"),
+                    str_arg("new_string"),
+                ) else {
                     return ToolOutcome::err("missing path, old_string or new_string");
                 };
                 let p = match self.workspace.resolve(path) {
@@ -244,7 +276,9 @@ impl Toolset {
                         Ok(()) => ToolOutcome::ok("edited", "edit", self.workspace.display(&p)),
                         Err(e) => ToolOutcome::err(format!("{path}: {e}")),
                     },
-                    n => ToolOutcome::err(format!("old_string occurs {n} times in {path}; make it unique")),
+                    n => ToolOutcome::err(format!(
+                        "old_string occurs {n} times in {path}; make it unique"
+                    )),
                 }
             }
             "list_dir" => {
@@ -269,7 +303,9 @@ impl Toolset {
                 ToolOutcome::ok(names.join("\n"), "read", self.workspace.display(&p))
             }
             "search" => {
-                let Some(pattern) = str_arg("pattern") else { return ToolOutcome::err("missing pattern") };
+                let Some(pattern) = str_arg("pattern") else {
+                    return ToolOutcome::err("missing pattern");
+                };
                 let re = match regex::Regex::new(pattern) {
                     Ok(r) => r,
                     Err(e) => return ToolOutcome::err(format!("bad regex: {e}")),
@@ -280,11 +316,23 @@ impl Toolset {
                     Err(e) => return ToolOutcome::err(e),
                 };
                 let ws = self.workspace.clone();
-                let hits = tokio::task::spawn_blocking(move || search(&ws, &p, &re)).await.unwrap_or_default();
-                ToolOutcome::ok(if hits.is_empty() { "no matches".into() } else { hits.join("\n") }, "search", pattern)
+                let hits = tokio::task::spawn_blocking(move || search(&ws, &p, &re))
+                    .await
+                    .unwrap_or_default();
+                ToolOutcome::ok(
+                    if hits.is_empty() {
+                        "no matches".into()
+                    } else {
+                        hits.join("\n")
+                    },
+                    "search",
+                    pattern,
+                )
             }
             "run_command" => {
-                let Some(command) = str_arg("command") else { return ToolOutcome::err("missing command") };
+                let Some(command) = str_arg("command") else {
+                    return ToolOutcome::err("missing command");
+                };
                 let cwd = self.workspace.root().to_path_buf();
                 if !self.approver.approve(command, &cwd).await {
                     return ToolOutcome {
@@ -294,9 +342,16 @@ impl Toolset {
                     };
                 }
                 let mut cmd = tokio::process::Command::new("sh");
-                cmd.arg("-c").arg(command).current_dir(&cwd).kill_on_drop(true).stdin(std::process::Stdio::null());
+                cmd.arg("-c")
+                    .arg(command)
+                    .current_dir(&cwd)
+                    .kill_on_drop(true)
+                    .stdin(std::process::Stdio::null());
                 match tokio::time::timeout(self.command_timeout, cmd.output()).await {
-                    Err(_) => ToolOutcome::err(format!("command timed out after {:?}", self.command_timeout)),
+                    Err(_) => ToolOutcome::err(format!(
+                        "command timed out after {:?}",
+                        self.command_timeout
+                    )),
                     Ok(Err(e)) => ToolOutcome::err(format!("failed to start: {e}")),
                     Ok(Ok(out)) => {
                         let mut text = String::from_utf8_lossy(&out.stdout).into_owned();
@@ -330,7 +385,9 @@ fn search(ws: &Workspace, dir: &Path, re: &regex::Regex) -> Vec<String> {
     let mut out = Vec::new();
     let mut stack = vec![dir.to_path_buf()];
     while let Some(d) = stack.pop() {
-        let Ok(rd) = std::fs::read_dir(&d) else { continue };
+        let Ok(rd) = std::fs::read_dir(&d) else {
+            continue;
+        };
         let mut entries: Vec<_> = rd.flatten().collect();
         entries.sort_by_key(|e| e.file_name());
         for e in entries {
@@ -343,7 +400,9 @@ fn search(ws: &Workspace, dir: &Path, re: &regex::Regex) -> Vec<String> {
             if ft.is_dir() {
                 stack.push(p);
             } else if ft.is_file() {
-                let Ok(text) = std::fs::read_to_string(&p) else { continue };
+                let Ok(text) = std::fs::read_to_string(&p) else {
+                    continue;
+                };
                 for (i, line) in text.lines().enumerate() {
                     if re.is_match(line) {
                         out.push(format!("{}:{}: {}", ws.display(&p), i + 1, line.trim_end()));
@@ -376,27 +435,48 @@ mod tests {
             assert!(ws.resolve("link/passwd").is_err());
         }
         let tools = Toolset::new(ws, Arc::new(DenyAllCommands));
-        let w = tools.execute("write_file", &json!({"path": "src/a.txt", "content": "hello world"})).await;
+        let w = tools
+            .execute(
+                "write_file",
+                &json!({"path": "src/a.txt", "content": "hello world"}),
+            )
+            .await;
         assert!(!w.is_error, "{w:?}");
-        let e = tools.execute("edit_file", &json!({"path": "src/a.txt", "old_string": "world", "new_string": "astra"})).await;
+        let e = tools
+            .execute(
+                "edit_file",
+                &json!({"path": "src/a.txt", "old_string": "world", "new_string": "astra"}),
+            )
+            .await;
         assert!(!e.is_error);
-        let r = tools.execute("read_file", &json!({"path": "src/a.txt"})).await;
+        let r = tools
+            .execute("read_file", &json!({"path": "src/a.txt"}))
+            .await;
         assert_eq!(r.content, "hello astra");
         let s = tools.execute("search", &json!({"pattern": "ast.a"})).await;
         assert!(s.content.contains("src/a.txt:1: hello astra"), "{s:?}");
         let l = tools.execute("list_dir", &json!({})).await;
         assert!(l.content.contains("src/"));
-        let c = tools.execute("run_command", &json!({"command": "touch x"})).await;
+        let c = tools
+            .execute("run_command", &json!({"command": "touch x"}))
+            .await;
         assert!(c.is_error && !dir.path().join("x").exists());
-        let bad = tools.execute("write_file", &json!({"path": "../escape", "content": ""})).await;
+        let bad = tools
+            .execute("write_file", &json!({"path": "../escape", "content": ""}))
+            .await;
         assert!(bad.is_error);
     }
 
     #[tokio::test]
     async fn runs_approved_commands() {
         let dir = tempfile::tempdir().expect("tmp");
-        let tools = Toolset::new(Workspace::new(dir.path()).expect("ws"), Arc::new(AllowAllCommands));
-        let c = tools.execute("run_command", &json!({"command": "echo hi > f && cat f"})).await;
+        let tools = Toolset::new(
+            Workspace::new(dir.path()).expect("ws"),
+            Arc::new(AllowAllCommands),
+        );
+        let c = tools
+            .execute("run_command", &json!({"command": "echo hi > f && cat f"}))
+            .await;
         assert!(!c.is_error, "{c:?}");
         assert!(c.content.contains("hi"));
         assert_eq!(c.log, Some(("run".into(), "echo hi > f && cat f".into())));

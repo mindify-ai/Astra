@@ -28,7 +28,9 @@ impl Format {
 /// Encode a frame.
 pub fn encode<T: Serialize>(format: Format, frame: &T) -> Result<Vec<u8>> {
     match format {
-        Format::MsgPack => rmp_serde::to_vec_named(frame).map_err(|e| SyncError::Codec(e.to_string())),
+        Format::MsgPack => {
+            rmp_serde::to_vec_named(frame).map_err(|e| SyncError::Codec(e.to_string()))
+        }
         Format::Json => serde_json::to_vec(frame).map_err(|e| SyncError::Codec(e.to_string())),
     }
 }
@@ -36,7 +38,9 @@ pub fn encode<T: Serialize>(format: Format, frame: &T) -> Result<Vec<u8>> {
 /// Decode a frame.
 pub fn decode<T: DeserializeOwned>(format: Format, bytes: &[u8]) -> Result<T> {
     match format {
-        Format::MsgPack => rmp_serde::from_slice(bytes).map_err(|e| SyncError::Codec(e.to_string())),
+        Format::MsgPack => {
+            rmp_serde::from_slice(bytes).map_err(|e| SyncError::Codec(e.to_string()))
+        }
         Format::Json => serde_json::from_slice(bytes).map_err(|e| SyncError::Codec(e.to_string())),
     }
 }
@@ -49,10 +53,23 @@ mod tests {
     #[test]
     fn both_formats_roundtrip() {
         for f in [Format::MsgPack, Format::Json] {
-            let frame = ClientFrame::Hello { workspace_id: "w".into(), node_id: "n".into(), cursor: 9, token: None };
-            assert_eq!(decode::<ClientFrame>(f, &encode(f, &frame).expect("enc")).expect("dec"), frame);
-            let frame = ServerFrame::Ack { ids: vec!["a".into()] };
-            assert_eq!(decode::<ServerFrame>(f, &encode(f, &frame).expect("enc")).expect("dec"), frame);
+            let frame = ClientFrame::Hello {
+                workspace_id: "w".into(),
+                node_id: "n".into(),
+                cursor: 9,
+                token: None,
+            };
+            assert_eq!(
+                decode::<ClientFrame>(f, &encode(f, &frame).expect("enc")).expect("dec"),
+                frame
+            );
+            let frame = ServerFrame::Ack {
+                ids: vec!["a".into()],
+            };
+            assert_eq!(
+                decode::<ServerFrame>(f, &encode(f, &frame).expect("enc")).expect("dec"),
+                frame
+            );
         }
         assert!(decode::<ServerFrame>(Format::Json, b"{\"t\":\"nope\"}").is_err());
     }

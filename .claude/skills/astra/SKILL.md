@@ -1,4 +1,5 @@
 ---
+
 name: astra
 description: How to work in the Astra monorepo (Mindify AI's multi-agent development environment) — the React UI, design system, sync client, Rust core, Tauri shell and GCP Terraform. Use for any change in this repository: building or editing screens, changing the protocol or reducer, adding agent adapters or relay endpoints, touching tokens or styling, Tauri/mobile work, deployment, or deciding which tests to run before committing.
 ---
@@ -6,7 +7,7 @@ description: How to work in the Astra monorepo (Mindify AI's multi-agent develop
 # Working on Astra
 
 Astra lets people run coding agents from any vendor (Claude Code, Codex, Gemini CLI, LangGraph, custom
-commands) on one repository, split or race them on a *mission*, steer and approve them with teammates, and
+commands) on one repository, split or race them on a _mission_, steer and approve them with teammates, and
 merge the result. Desktop, web, iOS and Android all run **one React UI**. **Runner nodes** (the desktop app, or
 `astrad`) execute agents and keep keys; the **relay** (`astra-server`) only syncs ops. Everything is
 local-first: clients reduce an op log into state, and sync it when they're connected.
@@ -16,20 +17,20 @@ Read before non-trivial work: `docs/ARCHITECTURE.md` (system), `docs/PROTOCOL.md
 
 ## Map
 
-| Path | What | Notes |
-|---|---|---|
-| `packages/tokens` | `tokens.json` → `src/generated/{theme.css,tokens.ts}` | Never edit generated files; run `pnpm tokens` |
-| `packages/ui` | Design-system primitives (`@astra/ui`) | Presentational only: no client or router imports |
-| `packages/client` | Protocol types, HLC/ULID, LWW reducer, `MockClient`/`TauriClient`/`RemoteClient`, actions, auth | `src/generated/protocol.ts` comes from Rust |
-| `packages/app` | Routes (`src/router.tsx`), screens, phone screens, context | Talks only to `AstraClient`, never to a transport |
-| `apps/web` | SaaS entry, service worker, `scripts/screenshots.mjs` | Demo workspace when `VITE_ASTRA_RELAY_URL` is unset |
-| `apps/desktop` | Tauri 2 app (desktop + iOS + Android); `src-tauri` embeds `astra-node` | `src-tauri` is **outside** the Cargo workspace (needs webkit2gtk) |
-| `crates/astra-protocol` | Rust protocol, reducer, HLC; `export-ts` bin | Mirrors `packages/client/src/types.ts` |
-| `crates/astra-store` · `astra-sync` | SQLite op log; sync client/hub | |
-| `crates/astra-runtime` · `astra-llm` | Agent adapters, worktrees, orchestration, policies; model providers | |
-| `crates/astra-node` · `astrad` · `astra-server` | Embeddable node; headless runner/LAN host; Axum relay | |
-| `infra/gcp` | Terraform: Cloud Run relay, Cloud SQL, CDN web, WIF deploys | Has offline `terraform test` |
-| `fixtures/` | `seed.json` (demo workspace), `ops-conformance.json` | Shared by the Rust and TS tests |
+| Path                                            | What                                                                                            | Notes                                                             |
+| ----------------------------------------------- | ----------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| `packages/tokens`                               | `tokens.json` → `src/generated/{theme.css,tokens.ts}`                                           | Never edit generated files; run `pnpm tokens`                     |
+| `packages/ui`                                   | Design-system primitives (`@astra/ui`)                                                          | Presentational only: no client or router imports                  |
+| `packages/client`                               | Protocol types, HLC/ULID, LWW reducer, `MockClient`/`TauriClient`/`RemoteClient`, actions, auth | `src/generated/protocol.ts` comes from Rust                       |
+| `packages/app`                                  | Routes (`src/router.tsx`), screens, phone screens, context                                      | Talks only to `AstraClient`, never to a transport                 |
+| `apps/web`                                      | SaaS entry, service worker, `scripts/screenshots.mjs`                                           | Demo workspace when `VITE_ASTRA_RELAY_URL` is unset               |
+| `apps/desktop`                                  | Tauri 2 app (desktop + iOS + Android); `src-tauri` embeds `astra-node`                          | `src-tauri` is **outside** the Cargo workspace (needs webkit2gtk) |
+| `crates/astra-protocol`                         | Rust protocol, reducer, HLC; `export-ts` bin                                                    | Mirrors `packages/client/src/types.ts`                            |
+| `crates/astra-store` · `astra-sync`             | SQLite op log; sync client/hub                                                                  |                                                                   |
+| `crates/astra-runtime` · `astra-llm`            | Agent adapters, worktrees, orchestration, policies; model providers                             |                                                                   |
+| `crates/astra-node` · `astrad` · `astra-server` | Embeddable node; headless runner/LAN host; Axum relay                                           |                                                                   |
+| `infra/gcp`                                     | Terraform: Cloud Run relay, Cloud SQL, CDN web, WIF deploys                                     | Has offline `terraform test`                                      |
+| `fixtures/`                                     | `seed.json` (demo workspace), `ops-conformance.json`                                            | Shared by the Rust and TS tests                                   |
 
 ## Commands
 
@@ -41,6 +42,7 @@ pnpm lint                         # biome (format + lint); `pnpm format` / `npx 
 pnpm tokens                       # regenerate token CSS/TS after editing tokens.json
 cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace
 cargo run -p astra-protocol --bin export-ts   # after changing Rust protocol types
+pnpm e2e                          # whole stack, no mocks: browser → relay → astrad → git worktrees → merge
 pnpm --filter @astra/desktop app:dev          # desktop app (needs the platform webview)
 ```
 
@@ -53,19 +55,22 @@ Terraform (in `infra/gcp`): `terraform fmt -check -recursive && terraform init -
 ## Rules that are easy to break
 
 1. **The protocol has two implementations.** A change to entities, ops, commands or reducer rules touches
-   *all* of these, in the same change:
+   _all_ of these, in the same change:
    - `docs/PROTOCOL.md`;
    - `crates/astra-protocol`, then regenerate `packages/client/src/generated/protocol.ts`;
    - `packages/client/src/types.ts` and `reducer.ts`;
    - a case in `fixtures/ops-conformance.json`, which both test suites run.
-   JSON is camelCase, enums are camelCase strings, optional values are explicit `null` (never omitted), and
-   tagged unions use `type` (entities use `kind`).
+     JSON is camelCase, enums are camelCase strings, optional values are explicit `null` (never omitted), and
+     tagged unions use `type` (entities use `kind`).
 2. **Who writes what** (`docs/PROTOCOL.md`):
-   - The *client* writes human messages and puts the mission, its agents and memberships.
-   - The *runner node* writes everything that results from a `command`: approval state, statuses, results,
+   - The _client_ writes human messages and puts the mission, its agents and memberships.
+   - The _runner node_ writes everything that results from a `command`: approval state, statuses, results,
      merges, agent messages.
-   - `MockClient` (`packages/client/src/mock.ts`) simulates the node and must follow the same rules, including
-     the authorization checks (`canApprove`, steering lock). Change it whenever node behaviour changes.
+   - `MockClient` (`packages/client/src/mock.ts`) simulates the node and must follow the same rules. The
+     authorization rules live once in `packages/client/src/policy.ts` (`mayDecide`, `maySteer`). They mirror
+     `crates/astra-runtime/src/policy.rs`, and the UI uses them through `select.ts`. Change all of these together.
+   - The relay rejects ops whose `actor` isn't the signed-in person, or the connection's own node for non-command
+     ops. Never stamp ops with another person's id.
 3. **The UI goes through actions, not raw ops.** Use `packages/client/src/actions.ts` (`createMission`,
    `approve`, `sendMessage`, `merge`, …). Add an action there rather than calling `client.submit` with
    hand-built ops from a screen.
@@ -102,6 +107,7 @@ Terraform (in `infra/gcp`): `terraform fmt -check -recursive && terraform init -
 ## Recipes
 
 **New screen.**
+
 1. Build it in `packages/app/src/screens/X.tsx` from `@astra/ui` primitives.
 2. Add the route in `router.tsx`, plus a phone variant in `mobile/` if needed.
 3. Add a test in `packages/app/test/` that mounts `<AstraApp client={new MockClient({ seed: demoSeed, latency: 0 })}
@@ -109,6 +115,7 @@ Terraform (in `infra/gcp`): `terraform fmt -check -recursive && terraform init -
 4. Screenshot it.
 
 **New command.**
+
 1. Add it to the protocol (rule 1).
 2. Handle it in `MockClient` and in the `astra-runtime` orchestrator. Effects are ops plus a `commandResult`,
    and it runs exactly once (deduplicated by op id).
@@ -128,6 +135,7 @@ Terraform checks.
 
 ## Before committing
 
-Run `pnpm lint && pnpm typecheck && pnpm test` for TS changes, and the cargo trio for Rust. For UI changes, take
+Run `pnpm lint && pnpm typecheck && pnpm test` for TS changes, and the cargo trio for Rust. Run `pnpm e2e` for
+changes that touch sync, the relay, the runtime or the hosted web flow. For UI changes, take
 screenshots and look at them. Commit on the working branch with a descriptive message. Don't edit
 `src/generated/**` by hand.

@@ -53,9 +53,16 @@ All changes are ops. An op is `{id, hlc, actor, body}`:
 | --------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------- |
 | `put`           | `entity`                             | Create or replace. Last writer wins by `hlc` per entity.                                                |
 | `patch`         | `entityKind, id, fields`             | Last writer wins **per field** by `hlc`. Ignored if the entity is unknown.                              |
-| `delete`        | `entityKind, id`                     | Tombstone.                                                                                              |
+| `delete`        | `entityKind, id`                     | Tombstone (see visibility below).                                                                       |
 | `command`       | `node, command`                      | A side effect addressed to runner node `node`. Executed **exactly once** by that node (dedup by op id). |
 | `commandResult` | `commandOp, ok, error: string\|null` | Appended by the node after it executes a command.                                                       |
+
+**Visibility after deletes.** A deleted entity keeps its last data and field clocks, hidden. Later ops still
+update those hidden fields by the same last-writer-wins rule. An entity is visible when it has no tombstone, or
+when its newest field clock is newer than the tombstone. So a write that is concurrent with a delete but newer
+than it revives the entity, whatever order the two arrive in. A put older than a tombstone is recorded hidden. The
+Rust reducer also ignores a write that would make the entity invalid. Both reducers are checked against every
+causal arrival order of `fixtures/ops-conformance.json`.
 
 `Command` (tagged by `type`):
 
@@ -72,9 +79,23 @@ A client creates a mission by issuing `put` ops for the mission, its missionAgen
 
 ### Rules for runner nodes
 
-- **Authorization.** `approve`/`deny` are honoured only from the mission owner, or from members with `steer` access
-  when `approvalPolicy = steerers`. `sendMessage` with `to` set requires the actor to hold that agent's
-  steering lock, or to take it implicitly when it is free.
+- **Authorization.**
+  - Approvals and merges may be decided by the mission owner. Members with `steer` access may also decide them
+    when the mission's `approvalPolicy` is `steerers`, or when the agent's `commandPolicy` is `askSteerers`.
+  - `sendMessage` and `takeSteering` need owner or steer access.
+  - `sendMessage` with `to` set also needs the agent's steering lock; the node takes it implicitly when it is free.
+  - The same rules live in `@astra/client` `policy.ts`, which the UI and the mock node use.
+- **Identity.** The relay checks every pushed op against the signed-in person. A `command` must be authored by
+  that person; any other op by that person or by the connection's own node id. Presence is rewritten to that
+  person. Runner nodes sign in to the relay with a person's session; there is no separate node identity yet.
+- **IDs the node creates:**
+  - approvals: `ap-<ulid>`
+  - messages: `msg-<ulid>`
+  - tasks: `t-<ulid>`
+  - results: `res-<missionId>` (split) or `res-<missionId>-<a|b…>` (race)
+  - merge: the merge id is the mission id
+- **Failures.** A mission that stops on an error goes to `needsYou`, with an agent message
+  `The mission stopped: …`.
 - **Agent ↔ approval mapping.** An agent permission request becomes an `approval` put plus a missionAgent patch
   `status: needsYou`. The decision resumes or cancels the agent.
 
@@ -83,7 +104,7 @@ A client creates a mission by issuing `put` ops for the mission, its missionAgen
 | command            | client writes                                                                             | node writes                                                                                                                                                                                                                                           |
 | ------------------ | ----------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `sendMessage`      | The `message` put, `author.type = person`                                                 | Delivers `body` to the target agent, or to every enabled agent when `to` is null; writes no duplicate message. If `to` is set and free, patches `steeredBy = actor`; if someone else holds it, rejects.                                               |
-| `approve` / `deny` | Only the command                                                                          | Patches the approval (`state, decidedBy, decidedAt`), the missionAgent status (`working`/`idle`) and the linked task's column, then resumes or cancels the agent.                                                                                     |
+| `approve` / `deny` | Only the command                                                                          | Patches the approval (`state, decidedBy, decidedAt`) and the missionAgent status (`working`/`idle`). The linked task goes to `working` on approve, or to `done` with note `Denied by <actor>` on deny. Then the node resumes or cancels the agent.    |
 | `merge`            | Only the command                                                                          | Writes the `merge` entity (`id = missionId`), patches mission `status = merged`, and patches the linked `needsYou` task to `done` with `mergedBy`.                                                                                                    |
 | `startMission`     | Mission put (`status = draft`, `number = max + 1`), missionAgents (`queued`), memberships | Patches mission `status = working`, then writes tasks/messages as agents run. Agent messages use `author.type = agent`; plans go in `plan`, edits and commands in `log` (`verb` = edit\|run\|read). `missionAgent.latest` keeps the last 3 log lines. |
 
@@ -97,10 +118,16 @@ WebSocket at `/v1/sync`. Frames are MessagePack by default; JSON with `?format=j
 | server → client | `{t:"welcome", cursor}`, `{t:"ops", ops, cursor}`, `{t:"ack", ids}`, `{t:"presence", presence}`, `{t:"error", message}` |
 
 - `cursor` is the server's per-workspace sequence number.
-- On `hello` the server replays every op after `cursor`.
-- Pushed ops are deduplicated by `id`.
+- On `hello` the server sends `welcome{cursor: head}`, then replays every op after the client's cursor in
+  `ops` frames. Each frame's `cursor` is the sequence number of its last op.
+- Pushed ops are deduplicated by `id`, echoed to the pusher as `ops`, then acknowledged with `ack`.
 - A runner node receives `command` ops addressed to it; commands for a node that is offline stay in the log
   until it reconnects.
+- `presence` frames carry `Presence[]` both ways. Client → server replaces that connection's entries; server →
+  client is the whole workspace.
+- A node's local cursor (`snapshot().cursor`, `astra://ops`) is its local op-log sequence, not the relay's.
+- **Scaling limit.** Live fan-out reaches only sockets on the same relay instance; sequence numbers stay correct
+  across instances. Run one relay instance until NATS or Postgres `LISTEN/NOTIFY` fan-out lands.
 
 The same protocol runs over the LAN: a phone talks directly to a desktop node over a Noise-encrypted WebSocket
 after QR pairing.

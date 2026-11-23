@@ -60,7 +60,10 @@ async fn apply(state: State<'_, AppState>, ops: Vec<Op>) -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn set_presence(state: State<'_, AppState>, presence: Option<PresenceInput>) -> Result<(), String> {
+async fn set_presence(
+    state: State<'_, AppState>,
+    presence: Option<PresenceInput>,
+) -> Result<(), String> {
     let p = presence.map(|p| Presence {
         person_id: state.info.me.clone(),
         mission_id: p.mission_id,
@@ -97,16 +100,12 @@ fn rfc3339(secs: u64) -> String {
     let d = doy - (153 * mp + 2) / 5 + 1;
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     let y = yoe + era * 400 + i64::from(m <= 2);
-    format!("{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z", rem / 3_600, rem % 3_600 / 60, rem % 60)
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn formats_rfc3339() {
-        assert_eq!(super::rfc3339(0), "1970-01-01T00:00:00Z");
-        assert_eq!(super::rfc3339(1_763_716_320), "2025-11-21T09:12:00Z");
-    }
+    format!(
+        "{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z",
+        rem / 3_600,
+        rem % 3_600 / 60,
+        rem % 60
+    )
 }
 
 fn read_settings(dir: &Path) -> Settings {
@@ -138,7 +137,10 @@ async fn start_node(data_dir: PathBuf) -> Result<(Node, NodeInfo), String> {
     if !seed_path.exists() {
         std::fs::write(&seed_path, SEED).map_err(|e| e.to_string())?;
     }
-    let workspace_id = settings.workspace_id.clone().unwrap_or_else(|| "ws-mindify".into());
+    let workspace_id = settings
+        .workspace_id
+        .clone()
+        .unwrap_or_else(|| "ws-mindify".into());
     let me = settings.me.clone().unwrap_or_else(|| "p-mark".into());
     let relay = match (settings.relay_url, settings.relay_token) {
         (Some(url), Some(token)) => Some(RelayConfig { url, token }),
@@ -155,7 +157,14 @@ async fn start_node(data_dir: PathBuf) -> Result<(Node, NodeInfo), String> {
     })
     .await
     .map_err(|e| e.to_string())?;
-    Ok((node, NodeInfo { node_id, workspace_id, me }))
+    Ok((
+        node,
+        NodeInfo {
+            node_id,
+            workspace_id,
+            me,
+        },
+    ))
 }
 
 /// Forwards node events to the webview.
@@ -165,7 +174,10 @@ fn forward_events(app: AppHandle, node: Arc<Node>) {
         loop {
             match rx.recv().await {
                 Ok(NodeEvent::Ops { ops, cursor }) => {
-                    let _ = app.emit("astra://ops", serde_json::json!({ "ops": ops, "cursor": cursor }));
+                    let _ = app.emit(
+                        "astra://ops",
+                        serde_json::json!({ "ops": ops, "cursor": cursor }),
+                    );
                 }
                 Ok(NodeEvent::Presence(p)) => {
                     let _ = app.emit("astra://presence", p);
@@ -195,7 +207,22 @@ pub fn run() {
             app.manage(AppState { node, info });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![node_info, snapshot, apply, set_presence, connectivity])
+        .invoke_handler(tauri::generate_handler![
+            node_info,
+            snapshot,
+            apply,
+            set_presence,
+            connectivity
+        ])
         .run(tauri::generate_context!())
         .expect("error while running Astra");
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn formats_rfc3339() {
+        assert_eq!(super::rfc3339(0), "1970-01-01T00:00:00Z");
+        assert_eq!(super::rfc3339(1_763_716_320), "2025-11-21T09:12:00Z");
+    }
 }

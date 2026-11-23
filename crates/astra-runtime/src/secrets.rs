@@ -33,11 +33,17 @@ impl SecretStore for MemorySecrets {
         self.map.lock().ok()?.get(key).cloned()
     }
     fn set(&self, key: &str, value: &str) -> Result<(), String> {
-        self.map.lock().map_err(|_| "poisoned".to_string())?.insert(key.into(), value.into());
+        self.map
+            .lock()
+            .map_err(|_| "poisoned".to_string())?
+            .insert(key.into(), value.into());
         Ok(())
     }
     fn delete(&self, key: &str) -> Result<(), String> {
-        self.map.lock().map_err(|_| "poisoned".to_string())?.remove(key);
+        self.map
+            .lock()
+            .map_err(|_| "poisoned".to_string())?
+            .remove(key);
         Ok(())
     }
 }
@@ -52,7 +58,11 @@ impl<S: SecretStore> SecretStore for WithEnvFallback<S> {
             let env = format!("ASTRA_SECRET_{}", key.to_ascii_uppercase());
             std::env::var(env)
                 .ok()
-                .or_else(|| (key == names::ANTHROPIC_API_KEY).then(|| std::env::var("ANTHROPIC_API_KEY").ok()).flatten())
+                .or_else(|| {
+                    (key == names::ANTHROPIC_API_KEY)
+                        .then(|| std::env::var("ANTHROPIC_API_KEY").ok())
+                        .flatten()
+                })
                 .filter(|v| !v.is_empty())
         })
     }
@@ -74,14 +84,19 @@ pub struct KeyringSecrets {
 impl KeyringSecrets {
     /// Secrets under keychain service `service` (e.g. `"ai.mindify.astra"`).
     pub fn new(service: impl Into<String>) -> Self {
-        KeyringSecrets { service: service.into() }
+        KeyringSecrets {
+            service: service.into(),
+        }
     }
 }
 
 #[cfg(feature = "keyring")]
 impl SecretStore for KeyringSecrets {
     fn get(&self, key: &str) -> Option<String> {
-        keyring::Entry::new(&self.service, key).ok()?.get_password().ok()
+        keyring::Entry::new(&self.service, key)
+            .ok()?
+            .get_password()
+            .ok()
     }
     fn set(&self, key: &str, value: &str) -> Result<(), String> {
         keyring::Entry::new(&self.service, key)

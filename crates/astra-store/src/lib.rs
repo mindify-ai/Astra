@@ -79,7 +79,9 @@ pub struct Store {
 
 impl std::fmt::Debug for Store {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Store").field("entities", &self.state.len()).finish()
+        f.debug_struct("Store")
+            .field("entities", &self.state.len())
+            .finish()
     }
 }
 
@@ -99,7 +101,11 @@ impl Store {
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
         conn.execute_batch(SCHEMA)?;
-        let mut store = Store { conn, state: State::default(), clocks: Clocks::new() };
+        let mut store = Store {
+            conn,
+            state: State::default(),
+            clocks: Clocks::new(),
+        };
         store.reload()?;
         Ok(store)
     }
@@ -111,7 +117,9 @@ impl Store {
         let mut state = State::new(workspace_id, me);
         let mut clocks = Clocks::new();
         {
-            let mut stmt = self.conn.prepare("SELECT kind, id, json, visible, tombstone FROM entities")?;
+            let mut stmt = self
+                .conn
+                .prepare("SELECT kind, id, json, visible, tombstone FROM entities")?;
             let rows = stmt.query_map([], |r| {
                 Ok((
                     r.get::<_, String>(0)?,
@@ -123,31 +131,55 @@ impl Store {
             })?;
             for row in rows {
                 let (kind, id, json, visible, tombstone) = row?;
-                let kind = EntityKind::parse(&kind).ok_or_else(|| StoreError::Corrupt(format!("kind {kind}")))?;
+                let kind = EntityKind::parse(&kind)
+                    .ok_or_else(|| StoreError::Corrupt(format!("kind {kind}")))?;
                 let data: Option<serde_json::Map<String, serde_json::Value>> =
                     json.map(|j| serde_json::from_str(&j)).transpose()?;
                 let tombstone = tombstone
-                    .map(|t| t.parse::<Hlc>().map_err(|e| StoreError::Corrupt(e.to_string())))
+                    .map(|t| {
+                        t.parse::<Hlc>()
+                            .map_err(|e| StoreError::Corrupt(e.to_string()))
+                    })
                     .transpose()?;
-                let mut clock = EntityClock { tombstone, ..EntityClock::default() };
+                let mut clock = EntityClock {
+                    tombstone,
+                    ..EntityClock::default()
+                };
                 match (visible, data) {
                     (true, Some(d)) => state.insert(Entity::from_json(kind, d)?),
                     (false, d) => clock.hidden = d,
-                    (true, None) => return Err(StoreError::Corrupt(format!("{kind}/{id} has no data"))),
+                    (true, None) => {
+                        return Err(StoreError::Corrupt(format!("{kind}/{id} has no data")));
+                    }
                 }
                 clocks.entities.insert((kind, id), clock);
             }
         }
         {
-            let mut stmt = self.conn.prepare("SELECT kind, id, field, hlc FROM field_clocks")?;
+            let mut stmt = self
+                .conn
+                .prepare("SELECT kind, id, field, hlc FROM field_clocks")?;
             let rows = stmt.query_map([], |r| {
-                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?))
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, String>(3)?,
+                ))
             })?;
             for row in rows {
                 let (kind, id, field, hlc) = row?;
-                let kind = EntityKind::parse(&kind).ok_or_else(|| StoreError::Corrupt(format!("kind {kind}")))?;
-                let hlc: Hlc = hlc.parse().map_err(|e: astra_protocol::HlcParseError| StoreError::Corrupt(e.to_string()))?;
-                clocks.entities.entry((kind, id)).or_default().fields.insert(field, hlc);
+                let kind = EntityKind::parse(&kind)
+                    .ok_or_else(|| StoreError::Corrupt(format!("kind {kind}")))?;
+                let hlc: Hlc = hlc.parse().map_err(|e: astra_protocol::HlcParseError| {
+                    StoreError::Corrupt(e.to_string())
+                })?;
+                clocks
+                    .entities
+                    .entry((kind, id))
+                    .or_default()
+                    .fields
+                    .insert(field, hlc);
             }
         }
         self.state = state;
@@ -167,7 +199,10 @@ impl Store {
 
     /// Read a metadata value.
     pub fn meta(&self, key: &str) -> Result<Option<String>> {
-        Ok(self.conn.query_row("SELECT value FROM meta WHERE key = ?1", [key], |r| r.get(0)).optional()?)
+        Ok(self
+            .conn
+            .query_row("SELECT value FROM meta WHERE key = ?1", [key], |r| r.get(0))
+            .optional()?)
     }
 
     /// Write a metadata value.
@@ -190,7 +225,10 @@ impl Store {
 
     /// The server cursor (last server sequence number received).
     pub fn cursor(&self) -> Result<u64> {
-        Ok(self.meta("cursor")?.and_then(|c| c.parse().ok()).unwrap_or(0))
+        Ok(self
+            .meta("cursor")?
+            .and_then(|c| c.parse().ok())
+            .unwrap_or(0))
     }
 
     /// Store the server cursor.
@@ -208,7 +246,9 @@ impl Store {
                 continue;
             }
             self.state.insert(entity.clone());
-            self.clocks.entities.insert(key.clone(), EntityClock::default());
+            self.clocks
+                .entities
+                .insert(key.clone(), EntityClock::default());
             persist_entity(&tx, &self.state, &self.clocks, key.0, &key.1)?;
             n += 1;
         }
@@ -246,24 +286,27 @@ impl Store {
                 _ => (None, None),
             };
             let local = origin == Origin::Local;
-            let exists = tx.query_row("SELECT 1 FROM ops WHERE id = ?1", [&op.id], |_| Ok(())).optional()?.is_some();
+            let exists = tx
+                .query_row("SELECT 1 FROM ops WHERE id = ?1", [&op.id], |_| Ok(()))
+                .optional()?
+                .is_some();
             let inserted = if exists {
                 0
             } else {
                 tx.execute(
-                "INSERT INTO ops (id, hlc, actor, body, local, acked, command_node, command_op)
+                    "INSERT INTO ops (id, hlc, actor, body, local, acked, command_node, command_op)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-                params![
-                    op.id,
-                    op.hlc.to_string(),
-                    op.actor,
-                    serde_json::to_string(&op.body)?,
-                    local,
-                    !local,
-                    command_node,
-                    command_op
-                ],
-            )?
+                    params![
+                        op.id,
+                        op.hlc.to_string(),
+                        op.actor,
+                        serde_json::to_string(&op.body)?,
+                        local,
+                        !local,
+                        command_node,
+                        command_op
+                    ],
+                )?
             };
             if inserted == 0 {
                 if origin == Origin::Remote {
@@ -271,7 +314,9 @@ impl Store {
                 }
                 continue;
             }
-            if let Effect::Changed(kind, id) = apply_body(&mut self.state, &mut self.clocks, &op.hlc, &op.body) {
+            if let Effect::Changed(kind, id) =
+                apply_body(&mut self.state, &mut self.clocks, &op.hlc, &op.body)
+            {
                 persist_entity(&tx, &self.state, &self.clocks, kind, &id)?;
             }
             fresh.push(op.clone());
@@ -282,31 +327,42 @@ impl Store {
 
     /// Whether an op id is in the log.
     pub fn contains_op(&self, id: &str) -> Result<bool> {
-        Ok(self.conn.query_row("SELECT 1 FROM ops WHERE id = ?1", [id], |_| Ok(())).optional()?.is_some())
+        Ok(self
+            .conn
+            .query_row("SELECT 1 FROM ops WHERE id = ?1", [id], |_| Ok(()))
+            .optional()?
+            .is_some())
     }
 
     /// The local sequence number of the newest op (0 if empty).
     pub fn head_seq(&self) -> Result<u64> {
-        let seq: Option<i64> = self.conn.query_row("SELECT MAX(seq) FROM ops", [], |r| r.get(0))?;
+        let seq: Option<i64> = self
+            .conn
+            .query_row("SELECT MAX(seq) FROM ops", [], |r| r.get(0))?;
         Ok(seq.and_then(|s| u64::try_from(s).ok()).unwrap_or(0))
     }
 
     /// Ops with local sequence number greater than `local_seq`, oldest first, at most `limit`.
     pub fn ops_since(&self, local_seq: u64, limit: usize) -> Result<Vec<(u64, Op)>> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT seq, id, hlc, actor, body FROM ops WHERE seq > ?1 ORDER BY seq LIMIT ?2")?;
+        let mut stmt = self.conn.prepare(
+            "SELECT seq, id, hlc, actor, body FROM ops WHERE seq > ?1 ORDER BY seq LIMIT ?2",
+        )?;
         let rows = stmt.query_map(params![to_i64(local_seq), to_i64(limit as u64)], row_to_op)?;
-        rows.map(|r| r.map_err(StoreError::from).and_then(|(seq, op)| Ok((seq, op?)))).collect()
+        rows.map(|r| {
+            r.map_err(StoreError::from)
+                .and_then(|(seq, op)| Ok((seq, op?)))
+        })
+        .collect()
     }
 
     /// Local ops not yet acknowledged by the server, oldest first.
     pub fn pending_outbound(&self) -> Result<Vec<Op>> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT seq, id, hlc, actor, body FROM ops WHERE local = 1 AND acked = 0 ORDER BY seq")?;
+        let mut stmt = self.conn.prepare(
+            "SELECT seq, id, hlc, actor, body FROM ops WHERE local = 1 AND acked = 0 ORDER BY seq",
+        )?;
         let rows = stmt.query_map([], row_to_op)?;
-        rows.map(|r| r.map_err(StoreError::from).and_then(|(_, op)| op)).collect()
+        rows.map(|r| r.map_err(StoreError::from).and_then(|(_, op)| op))
+            .collect()
     }
 
     /// Mark ops as acknowledged by the server (optionally recording their server sequence).
@@ -326,7 +382,11 @@ impl Store {
     pub fn has_command_result(&self, command_op: &str) -> Result<bool> {
         Ok(self
             .conn
-            .query_row("SELECT 1 FROM ops WHERE command_op = ?1 LIMIT 1", [command_op], |_| Ok(()))
+            .query_row(
+                "SELECT 1 FROM ops WHERE command_op = ?1 LIMIT 1",
+                [command_op],
+                |_| Ok(()),
+            )
             .optional()?
             .is_some())
     }
@@ -340,12 +400,15 @@ impl Store {
              ORDER BY o.seq",
         )?;
         let rows = stmt.query_map([node], row_to_op)?;
-        rows.map(|r| r.map_err(StoreError::from).and_then(|(_, op)| op)).collect()
+        rows.map(|r| r.map_err(StoreError::from).and_then(|(_, op)| op))
+            .collect()
     }
 
     /// Number of ops in the log.
     pub fn op_count(&self) -> Result<u64> {
-        let n: i64 = self.conn.query_row("SELECT COUNT(*) FROM ops", [], |r| r.get(0))?;
+        let n: i64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM ops", [], |r| r.get(0))?;
         Ok(u64::try_from(n).unwrap_or(0))
     }
 }
@@ -365,7 +428,9 @@ fn row_to_op(r: &rusqlite::Row<'_>) -> rusqlite::Result<OpRow> {
     let op = (|| -> Result<Op> {
         Ok(Op {
             id,
-            hlc: hlc.parse().map_err(|e: astra_protocol::HlcParseError| StoreError::Corrupt(e.to_string()))?,
+            hlc: hlc
+                .parse()
+                .map_err(|e: astra_protocol::HlcParseError| StoreError::Corrupt(e.to_string()))?,
             actor,
             body: serde_json::from_str(&body)?,
         })
@@ -373,7 +438,13 @@ fn row_to_op(r: &rusqlite::Row<'_>) -> rusqlite::Result<OpRow> {
     Ok((u64::try_from(seq).unwrap_or(0), op))
 }
 
-fn persist_entity(tx: &Transaction<'_>, state: &State, clocks: &Clocks, kind: EntityKind, id: &str) -> Result<()> {
+fn persist_entity(
+    tx: &Transaction<'_>,
+    state: &State,
+    clocks: &Clocks,
+    kind: EntityKind,
+    id: &str,
+) -> Result<()> {
     let clock = clocks.entity(kind, id).cloned().unwrap_or_default();
     let (json, visible) = match state.get(kind, id) {
         Some(e) => {
@@ -381,13 +452,26 @@ fn persist_entity(tx: &Transaction<'_>, state: &State, clocks: &Clocks, kind: En
             m.remove("kind");
             (Some(serde_json::to_string(&m)?), true)
         }
-        None => (clock.hidden.as_ref().map(serde_json::to_string).transpose()?, false),
+        None => (
+            clock
+                .hidden
+                .as_ref()
+                .map(serde_json::to_string)
+                .transpose()?,
+            false,
+        ),
     };
     tx.execute(
         "INSERT INTO entities (kind, id, json, visible, tombstone) VALUES (?1, ?2, ?3, ?4, ?5)
          ON CONFLICT(kind, id) DO UPDATE SET json = excluded.json, visible = excluded.visible,
            tombstone = excluded.tombstone",
-        params![kind.as_str(), id, json, visible, clock.tombstone.as_ref().map(|t| t.to_string())],
+        params![
+            kind.as_str(),
+            id,
+            json,
+            visible,
+            clock.tombstone.as_ref().map(|t| t.to_string())
+        ],
     )?;
     for (field, hlc) in &clock.fields {
         tx.execute(
@@ -405,27 +489,59 @@ mod tests {
     use astra_protocol::{Command, Person, Reducer};
 
     fn person(id: &str, name: &str) -> Entity {
-        Entity::Person(Person { id: id.into(), name: name.into(), initials: name[..1].into() })
+        Entity::Person(Person {
+            id: id.into(),
+            name: name.into(),
+            initials: name[..1].into(),
+        })
     }
 
     fn op(id: &str, hlc: u64, body: OpBody) -> Op {
-        Op { id: id.into(), hlc: Hlc::new(hlc, 0, "n1"), actor: "n1".into(), body }
+        Op {
+            id: id.into(),
+            hlc: Hlc::new(hlc, 0, "n1"),
+            actor: "n1".into(),
+            body,
+        }
     }
 
     #[test]
     fn append_is_idempotent_and_tracks_outbound() {
         let mut s = Store::open_in_memory().expect("open");
-        let a = op("a", 10, OpBody::put(Person { id: "p".into(), name: "A".into(), initials: "A".into() }));
-        let fresh = s.append(std::slice::from_ref(&a), Origin::Local).expect("append");
+        let a = op(
+            "a",
+            10,
+            OpBody::put(Person {
+                id: "p".into(),
+                name: "A".into(),
+                initials: "A".into(),
+            }),
+        );
+        let fresh = s
+            .append(std::slice::from_ref(&a), Origin::Local)
+            .expect("append");
         assert_eq!(fresh.len(), 1);
-        assert!(s.append(std::slice::from_ref(&a), Origin::Local).expect("append").is_empty());
+        assert!(
+            s.append(std::slice::from_ref(&a), Origin::Local)
+                .expect("append")
+                .is_empty()
+        );
         assert_eq!(s.pending_outbound().expect("pending"), vec![a.clone()]);
         s.mark_acked(&["a".into()], Some(7)).expect("ack");
         assert!(s.pending_outbound().expect("pending").is_empty());
         // Remote echo of a pending local op acks it.
-        let b = op("b", 11, OpBody::patch(EntityKind::Person, "p", [("name", "B".into())]));
-        s.append(std::slice::from_ref(&b), Origin::Local).expect("append");
-        assert!(s.append(std::slice::from_ref(&b), Origin::Remote).expect("append").is_empty());
+        let b = op(
+            "b",
+            11,
+            OpBody::patch(EntityKind::Person, "p", [("name", "B".into())]),
+        );
+        s.append(std::slice::from_ref(&b), Origin::Local)
+            .expect("append");
+        assert!(
+            s.append(std::slice::from_ref(&b), Origin::Remote)
+                .expect("append")
+                .is_empty()
+        );
         assert!(s.pending_outbound().expect("pending").is_empty());
         assert_eq!(s.head_seq().expect("head"), 2);
         assert_eq!(s.ops_since(1, 10).expect("since").len(), 1);
@@ -436,16 +552,41 @@ mod tests {
         let dir = tempfile::tempdir().expect("tmp");
         let path = dir.path().join("astra.db");
         let ops = vec![
-            op("1", 100, OpBody::Put { entity: person("p-1", "One") }),
-            op("2", 300, OpBody::patch(EntityKind::Person, "p-1", [("name", "Uno".into())])),
-            op("3", 100, OpBody::Put { entity: person("p-2", "Two") }),
-            op("4", 200, OpBody::Delete { entity_kind: EntityKind::Person, id: "p-2".into() }),
+            op(
+                "1",
+                100,
+                OpBody::Put {
+                    entity: person("p-1", "One"),
+                },
+            ),
+            op(
+                "2",
+                300,
+                OpBody::patch(EntityKind::Person, "p-1", [("name", "Uno".into())]),
+            ),
+            op(
+                "3",
+                100,
+                OpBody::Put {
+                    entity: person("p-2", "Two"),
+                },
+            ),
+            op(
+                "4",
+                200,
+                OpBody::Delete {
+                    entity_kind: EntityKind::Person,
+                    id: "p-2".into(),
+                },
+            ),
             op(
                 "5",
                 400,
                 OpBody::Command {
                     node: "n-9".into(),
-                    command: Command::StartMission { mission_id: "m".into() },
+                    command: Command::StartMission {
+                        mission_id: "m".into(),
+                    },
                 },
             ),
         ];
@@ -464,17 +605,37 @@ mod tests {
         // Clocks survived: an older put does not overwrite the newer patch, a late patch stays hidden.
         s.append(
             &[
-                op("6", 250, OpBody::Put { entity: person("p-1", "Old") }),
-                op("7", 150, OpBody::patch(EntityKind::Person, "p-2", [("name", "late".into())])),
+                op(
+                    "6",
+                    250,
+                    OpBody::Put {
+                        entity: person("p-1", "Old"),
+                    },
+                ),
+                op(
+                    "7",
+                    150,
+                    OpBody::patch(EntityKind::Person, "p-2", [("name", "late".into())]),
+                ),
             ],
             Origin::Remote,
         )
         .expect("append");
-        assert!(matches!(s.state().get(EntityKind::Person, "p-1"), Some(Entity::Person(p)) if p.name == "Uno"));
+        assert!(
+            matches!(s.state().get(EntityKind::Person, "p-1"), Some(Entity::Person(p)) if p.name == "Uno")
+        );
         assert!(s.state().get(EntityKind::Person, "p-2").is_none());
         assert_eq!(s.unexecuted_commands("n-9").expect("cmds").len(), 1);
         s.append(
-            &[op("8", 500, OpBody::CommandResult { command_op: "5".into(), ok: true, error: None })],
+            &[op(
+                "8",
+                500,
+                OpBody::CommandResult {
+                    command_op: "5".into(),
+                    ok: true,
+                    error: None,
+                },
+            )],
             Origin::Local,
         )
         .expect("append");
@@ -493,9 +654,18 @@ mod tests {
         };
         assert_eq!(s.seed(&seed).expect("seed"), 1);
         assert_eq!(s.seed(&seed).expect("seed"), 0);
-        s.append(&[op("x", 1, OpBody::patch(EntityKind::Person, "p-a", [("name", "Anna".into())]))], Origin::Local)
-            .expect("append");
-        assert!(matches!(s.state().get(EntityKind::Person, "p-a"), Some(Entity::Person(p)) if p.name == "Anna"));
+        s.append(
+            &[op(
+                "x",
+                1,
+                OpBody::patch(EntityKind::Person, "p-a", [("name", "Anna".into())]),
+            )],
+            Origin::Local,
+        )
+        .expect("append");
+        assert!(
+            matches!(s.state().get(EntityKind::Person, "p-a"), Some(Entity::Person(p)) if p.name == "Anna")
+        );
         assert_eq!(s.state().me, "p");
     }
 }

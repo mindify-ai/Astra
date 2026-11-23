@@ -8,10 +8,10 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use astra_protocol::{HlcClock, Op, OpBody, Person};
+use axum::Json;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::Json;
 use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -40,13 +40,25 @@ pub struct Jwt {
 impl Jwt {
     /// Keys from a shared secret.
     pub fn new(secret: &[u8]) -> Result<Self, jsonwebtoken::errors::Error> {
-        Ok(Jwt { enc: EncodingKey::from_secret(secret)?, dec: DecodingKey::from_secret(secret)? })
+        Ok(Jwt {
+            enc: EncodingKey::from_secret(secret)?,
+            dec: DecodingKey::from_secret(secret)?,
+        })
     }
 
     /// Issue a token for `person` in `workspace`.
-    pub fn issue(&self, person: &str, workspace: &str) -> Result<(String, Claims), jsonwebtoken::errors::Error> {
+    pub fn issue(
+        &self,
+        person: &str,
+        workspace: &str,
+    ) -> Result<(String, Claims), jsonwebtoken::errors::Error> {
         let now = chrono::Utc::now().timestamp();
-        let claims = Claims { sub: person.into(), ws: workspace.into(), iat: now, exp: now + SESSION_DAYS * 86_400 };
+        let claims = Claims {
+            sub: person.into(),
+            ws: workspace.into(),
+            iat: now,
+            exp: now + SESSION_DAYS * 86_400,
+        };
         let token = jsonwebtoken::encode(&Header::new(Algorithm::HS256), &claims, &self.enc)?;
         Ok((token, claims))
     }
@@ -67,13 +79,27 @@ pub struct JwtAuthorizer {
 
 #[async_trait::async_trait]
 impl astra_sync::Authorizer for JwtAuthorizer {
-    async fn authorize(&self, workspace_id: &str, _node_id: &str, token: Option<&str>) -> astra_sync::Result<astra_sync::Principal> {
-        let token = token.ok_or_else(|| astra_sync::SyncError::Unauthorized("missing token".into()))?;
-        let claims = self.jwt.verify(token).map_err(|e| astra_sync::SyncError::Unauthorized(e.to_string()))?;
+    async fn authorize(
+        &self,
+        workspace_id: &str,
+        _node_id: &str,
+        token: Option<&str>,
+    ) -> astra_sync::Result<astra_sync::Principal> {
+        let token =
+            token.ok_or_else(|| astra_sync::SyncError::Unauthorized("missing token".into()))?;
+        let claims = self
+            .jwt
+            .verify(token)
+            .map_err(|e| astra_sync::SyncError::Unauthorized(e.to_string()))?;
         if claims.ws != workspace_id {
-            return Err(astra_sync::SyncError::Unauthorized("workspace mismatch".into()));
+            return Err(astra_sync::SyncError::Unauthorized(
+                "workspace mismatch".into(),
+            ));
         }
-        Ok(astra_sync::Principal { subject: claims.sub })
+        Ok(astra_sync::Principal {
+            person: Some(claims.sub.clone()),
+            subject: claims.sub,
+        })
     }
 }
 
@@ -91,7 +117,10 @@ pub struct Session {
 pub fn initials(name: &str, login: &str) -> String {
     let words: Vec<&str> = name.split_whitespace().collect();
     let s: String = match words.as_slice() {
-        [a, b, ..] => [a.chars().next(), b.chars().next()].into_iter().flatten().collect(),
+        [a, b, ..] => [a.chars().next(), b.chars().next()]
+            .into_iter()
+            .flatten()
+            .collect(),
         [a] => a.chars().take(2).collect(),
         [] => login.chars().take(2).collect(),
     };
@@ -128,7 +157,13 @@ pub enum Directory {
 
 impl Directory {
     /// Record a person; returns true when they were not known before.
-    pub async fn upsert(&self, person: &Person, provider: &str, login: &str, workspace: &str) -> Result<bool, String> {
+    pub async fn upsert(
+        &self,
+        person: &Person,
+        provider: &str,
+        login: &str,
+        workspace: &str,
+    ) -> Result<bool, String> {
         match self {
             Directory::Memory(m) => {
                 let mut m = m.lock().map_err(|_| "poisoned".to_string())?;
@@ -137,14 +172,22 @@ impl Directory {
                 Ok(new)
             }
             Directory::Postgres(pool) => {
-                let existed: Option<(String,)> = sqlx::query_as("SELECT id FROM people WHERE id = $1")
-                    .bind(&person.id)
-                    .fetch_optional(pool)
-                    .await
-                    .map_err(|e| e.to_string())?;
-                crate::pg::upsert_person(pool, &person.id, &person.name, provider, login, workspace)
-                    .await
-                    .map_err(|e| e.to_string())?;
+                let existed: Option<(String,)> =
+                    sqlx::query_as("SELECT id FROM people WHERE id = $1")
+                        .bind(&person.id)
+                        .fetch_optional(pool)
+                        .await
+                        .map_err(|e| e.to_string())?;
+                crate::pg::upsert_person(
+                    pool,
+                    &person.id,
+                    &person.name,
+                    provider,
+                    login,
+                    workspace,
+                )
+                .await
+                .map_err(|e| e.to_string())?;
                 Ok(existed.is_none())
             }
         }
@@ -172,18 +215,43 @@ impl Directory {
 }
 
 /// Sign `person` in to `workspace`: record them, emit their `put` op on first sign-in, issue a session.
-pub async fn sign_in(state: &AppState, person: Person, provider: &str, login: &str, workspace: &str) -> Result<Session, String> {
-    let new = state.directory.upsert(&person, provider, login, workspace).await?;
+pub async fn sign_in(
+    state: &AppState,
+    person: Person,
+    provider: &str,
+    login: &str,
+    workspace: &str,
+) -> Result<Session, String> {
+    let new = state
+        .directory
+        .upsert(&person, provider, login, workspace)
+        .await?;
     if new {
-        let hlc = state.clock.lock().map_err(|_| "poisoned".to_string())?.tick();
+        let hlc = state
+            .clock
+            .lock()
+            .map_err(|_| "poisoned".to_string())?
+            .tick();
         let op = Op::new(hlc, "server", OpBody::put(person.clone()));
-        state.hub.append_server_ops(workspace, &[op]).await.map_err(|e| e.to_string())?;
+        state
+            .hub
+            .append_server_ops(workspace, &[op])
+            .await
+            .map_err(|e| e.to_string())?;
     }
-    let (token, claims) = state.jwt.issue(&person.id, workspace).map_err(|e| e.to_string())?;
+    let (token, claims) = state
+        .jwt
+        .issue(&person.id, workspace)
+        .map_err(|e| e.to_string())?;
     let expires_at = chrono::DateTime::from_timestamp(claims.exp, 0)
         .map(|d| d.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
         .unwrap_or_default();
-    Ok(Session { token, workspace_id: workspace.into(), person: person_json(&person), expires_at })
+    Ok(Session {
+        token,
+        workspace_id: workspace.into(),
+        person: person_json(&person),
+        expires_at,
+    })
 }
 
 /// A server-side HLC for ops the server emits.
@@ -197,13 +265,20 @@ pub struct DevTokenRequest {
 }
 
 /// `POST /v1/auth/dev-token` (only with `ASTRA_DEV_AUTH=1`).
-pub async fn dev_token(State(state): State<AppState>, Json(req): Json<DevTokenRequest>) -> Response {
+pub async fn dev_token(
+    State(state): State<AppState>,
+    Json(req): Json<DevTokenRequest>,
+) -> Response {
     if !state.config.dev_auth {
         return error(StatusCode::NOT_FOUND, "notFound");
     }
     let name = req.name.trim();
     let name = if name.is_empty() { "Dev" } else { name };
-    let person = Person { id: format!("p-dev-{}", slug(name)), name: name.into(), initials: initials(name, name) };
+    let person = Person {
+        id: format!("p-dev-{}", slug(name)),
+        name: name.into(),
+        initials: initials(name, name),
+    };
     match sign_in(&state, person, "dev", &slug(name), "ws-dev").await {
         Ok(session) => Json(json!({"session": session})).into_response(),
         Err(e) => {
@@ -222,11 +297,15 @@ pub async fn me(State(state): State<AppState>, headers: HeaderMap) -> Response {
     let Some(claims) = token.and_then(|t| state.jwt.verify(t).ok()) else {
         return error(StatusCode::UNAUTHORIZED, "unauthorized");
     };
-    let person = state.directory.get(&claims.sub).await.unwrap_or_else(|| Person {
-        id: claims.sub.clone(),
-        name: claims.sub.clone(),
-        initials: initials("", &claims.sub),
-    });
+    let person = state
+        .directory
+        .get(&claims.sub)
+        .await
+        .unwrap_or_else(|| Person {
+            id: claims.sub.clone(),
+            name: claims.sub.clone(),
+            initials: initials("", &claims.sub),
+        });
     Json(json!({"person": person_json(&person), "workspaceId": claims.ws})).into_response()
 }
 
@@ -286,28 +365,57 @@ impl Providers {
     }
 
     /// The device-code request.
-    pub fn device_code_request(&self, http: &reqwest::Client, p: Provider, client_id: &str) -> reqwest::Result<reqwest::Request> {
+    pub fn device_code_request(
+        &self,
+        http: &reqwest::Client,
+        p: Provider,
+        client_id: &str,
+    ) -> reqwest::Result<reqwest::Request> {
         let (url, scope) = match p {
-            Provider::Github => (format!("{}/login/device/code", self.github_oauth_base), "read:user user:email"),
-            Provider::Gitlab => (format!("{}/oauth/authorize_device", self.gitlab_base), "read_user"),
+            Provider::Github => (
+                format!("{}/login/device/code", self.github_oauth_base),
+                "read:user user:email",
+            ),
+            Provider::Gitlab => (
+                format!("{}/oauth/authorize_device", self.gitlab_base),
+                "read_user",
+            ),
         };
-        http.post(url).header("accept", "application/json").form(&[("client_id", client_id), ("scope", scope)]).build()
+        http.post(url)
+            .header("accept", "application/json")
+            .form(&[("client_id", client_id), ("scope", scope)])
+            .build()
     }
 
     /// The token poll request.
-    pub fn token_request(&self, http: &reqwest::Client, p: Provider, client_id: &str, device_code: &str) -> reqwest::Result<reqwest::Request> {
+    pub fn token_request(
+        &self,
+        http: &reqwest::Client,
+        p: Provider,
+        client_id: &str,
+        device_code: &str,
+    ) -> reqwest::Result<reqwest::Request> {
         let url = match p {
             Provider::Github => format!("{}/login/oauth/access_token", self.github_oauth_base),
             Provider::Gitlab => format!("{}/oauth/token", self.gitlab_base),
         };
         http.post(url)
             .header("accept", "application/json")
-            .form(&[("client_id", client_id), ("device_code", device_code), ("grant_type", DEVICE_GRANT)])
+            .form(&[
+                ("client_id", client_id),
+                ("device_code", device_code),
+                ("grant_type", DEVICE_GRANT),
+            ])
             .build()
     }
 
     /// The profile request.
-    pub fn user_request(&self, http: &reqwest::Client, p: Provider, access_token: &str) -> reqwest::Result<reqwest::Request> {
+    pub fn user_request(
+        &self,
+        http: &reqwest::Client,
+        p: Provider,
+        access_token: &str,
+    ) -> reqwest::Result<reqwest::Request> {
         let url = match p {
             Provider::Github => format!("{}/user", self.github_api_base),
             Provider::Gitlab => format!("{}/api/v4/user", self.gitlab_base),
@@ -334,19 +442,31 @@ pub struct DevicePollRequest {
 }
 
 async fn send_json(http: &reqwest::Client, req: reqwest::Request) -> Result<(u16, Value), String> {
-    let resp = http.execute(req).await.map_err(|e| e.without_url().to_string())?;
+    let resp = http
+        .execute(req)
+        .await
+        .map_err(|e| e.without_url().to_string())?;
     let status = resp.status().as_u16();
     let v = resp.json::<Value>().await.unwrap_or(Value::Null);
     Ok((status, v))
 }
 
 /// `POST /v1/auth/device/start`.
-pub async fn device_start(State(state): State<AppState>, Json(req): Json<DeviceStartRequest>) -> Response {
-    let Some(p) = Provider::parse(&req.provider) else { return error(StatusCode::BAD_REQUEST, "badProvider") };
+pub async fn device_start(
+    State(state): State<AppState>,
+    Json(req): Json<DeviceStartRequest>,
+) -> Response {
+    let Some(p) = Provider::parse(&req.provider) else {
+        return error(StatusCode::BAD_REQUEST, "badProvider");
+    };
     let Some(client_id) = state.config.providers.client_id(p) else {
         return error(StatusCode::SERVICE_UNAVAILABLE, "notConfigured");
     };
-    let r = match state.config.providers.device_code_request(&state.http, p, client_id) {
+    let r = match state
+        .config
+        .providers
+        .device_code_request(&state.http, p, client_id)
+    {
         Ok(r) => r,
         Err(_) => return error(StatusCode::INTERNAL_SERVER_ERROR, "internal"),
     };
@@ -372,8 +492,13 @@ pub async fn device_start(State(state): State<AppState>, Json(req): Json<DeviceS
 }
 
 /// `POST /v1/auth/device/poll`.
-pub async fn device_poll(State(state): State<AppState>, Json(req): Json<DevicePollRequest>) -> Response {
-    let Some(p) = Provider::parse(&req.provider) else { return error(StatusCode::BAD_REQUEST, "badProvider") };
+pub async fn device_poll(
+    State(state): State<AppState>,
+    Json(req): Json<DevicePollRequest>,
+) -> Response {
+    let Some(p) = Provider::parse(&req.provider) else {
+        return error(StatusCode::BAD_REQUEST, "badProvider");
+    };
     let providers = &state.config.providers;
     let Some(client_id) = providers.client_id(p) else {
         return error(StatusCode::SERVICE_UNAVAILABLE, "notConfigured");
@@ -392,7 +517,9 @@ pub async fn device_poll(State(state): State<AppState>, Json(req): Json<DevicePo
     if let Some(code) = v["error"].as_str() {
         return Json(match code {
             "authorization_pending" => json!({"status": "pending"}),
-            "slow_down" => json!({"status": "slowDown", "interval": v["interval"].as_u64().unwrap_or(10)}),
+            "slow_down" => {
+                json!({"status": "slowDown", "interval": v["interval"].as_u64().unwrap_or(10)})
+            }
             "expired_token" => json!({"status": "expired"}),
             "access_denied" => json!({"status": "denied"}),
             other => {
@@ -422,8 +549,16 @@ pub async fn device_poll(State(state): State<AppState>, Json(req): Json<DevicePo
     let Some(login) = user[login_field].as_str().map(|l| l.to_lowercase()) else {
         return error(StatusCode::BAD_GATEWAY, "providerError");
     };
-    let name = user["name"].as_str().filter(|n| !n.trim().is_empty()).map(str::to_string).unwrap_or_else(|| login.clone());
-    let person = Person { id: format!("p-{prefix}-{login}"), initials: initials(&name, &login), name };
+    let name = user["name"]
+        .as_str()
+        .filter(|n| !n.trim().is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| login.clone());
+    let person = Person {
+        id: format!("p-{prefix}-{login}"),
+        initials: initials(&name, &login),
+        name,
+    };
     let workspace = format!("ws-{prefix}-{login}");
     match sign_in(&state, person, prefix, &login, &workspace).await {
         Ok(session) => Json(json!({"status": "complete", "session": session})).into_response(),
@@ -444,8 +579,18 @@ mod tests {
         let (token, claims) = jwt.issue("p-1", "ws-1").expect("issue");
         assert_eq!(jwt.verify(&token).expect("verify"), claims);
         assert!(Jwt::new(b"other").expect("jwt").verify(&token).is_err());
-        let past = Claims { sub: "p".into(), ws: "w".into(), iat: 0, exp: 1000 };
-        let old = jsonwebtoken::encode(&Header::new(Algorithm::HS256), &past, &EncodingKey::from_secret(b"secret").expect("key")).expect("enc");
+        let past = Claims {
+            sub: "p".into(),
+            ws: "w".into(),
+            iat: 0,
+            exp: 1000,
+        };
+        let old = jsonwebtoken::encode(
+            &Header::new(Algorithm::HS256),
+            &past,
+            &EncodingKey::from_secret(b"secret").expect("key"),
+        )
+        .expect("enc");
         assert!(jwt.verify(&old).is_err());
     }
 
@@ -462,20 +607,37 @@ mod tests {
     fn device_flow_requests() {
         let http = reqwest::Client::new();
         let p = Providers::default();
-        let r = p.device_code_request(&http, Provider::Github, "cid").expect("req");
+        let r = p
+            .device_code_request(&http, Provider::Github, "cid")
+            .expect("req");
         assert_eq!(r.url().as_str(), "https://github.com/login/device/code");
         assert_eq!(r.headers()["accept"], "application/json");
-        let body = String::from_utf8(r.body().and_then(|b| b.as_bytes()).expect("body").to_vec()).expect("utf8");
+        let body = String::from_utf8(r.body().and_then(|b| b.as_bytes()).expect("body").to_vec())
+            .expect("utf8");
         assert_eq!(body, "client_id=cid&scope=read%3Auser+user%3Aemail");
-        let r = p.token_request(&http, Provider::Github, "cid", "dc").expect("req");
-        assert_eq!(r.url().as_str(), "https://github.com/login/oauth/access_token");
-        let body = String::from_utf8(r.body().and_then(|b| b.as_bytes()).expect("body").to_vec()).expect("utf8");
-        assert_eq!(body, "client_id=cid&device_code=dc&grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Adevice_code");
+        let r = p
+            .token_request(&http, Provider::Github, "cid", "dc")
+            .expect("req");
+        assert_eq!(
+            r.url().as_str(),
+            "https://github.com/login/oauth/access_token"
+        );
+        let body = String::from_utf8(r.body().and_then(|b| b.as_bytes()).expect("body").to_vec())
+            .expect("utf8");
+        assert_eq!(
+            body,
+            "client_id=cid&device_code=dc&grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Adevice_code"
+        );
         let r = p.user_request(&http, Provider::Github, "tok").expect("req");
         assert_eq!(r.url().as_str(), "https://api.github.com/user");
         assert_eq!(r.headers()["authorization"], "Bearer tok");
-        let r = p.device_code_request(&http, Provider::Gitlab, "gid").expect("req");
-        assert_eq!(r.url().as_str(), "https://gitlab.com/oauth/authorize_device");
+        let r = p
+            .device_code_request(&http, Provider::Gitlab, "gid")
+            .expect("req");
+        assert_eq!(
+            r.url().as_str(),
+            "https://gitlab.com/oauth/authorize_device"
+        );
         let r = p.user_request(&http, Provider::Gitlab, "tok").expect("req");
         assert_eq!(r.url().as_str(), "https://gitlab.com/api/v4/user");
     }

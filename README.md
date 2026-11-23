@@ -42,6 +42,35 @@ pnpm test && cargo test --workspace
 
 Append `?platform=mac|windows|linux|ios|android` to a web URL to preview another platform's chrome.
 
+### Full stack locally
+
+This runs the relay, a runner node and the hosted web app. Agents run on your machine, in git worktrees.
+
+```bash
+cargo build -p astra-server -p astrad
+```
+
+```bash
+ASTRA_DEV_AUTH=1 PORT=8787 ASTRA_ALLOWED_ORIGINS=http://127.0.0.1:5173 ./target/debug/astra-server
+```
+
+Get a session, then start a runner signed in as that person:
+
+```bash
+curl -s -X POST localhost:8787/v1/auth/dev-token -H 'content-type: application/json' -d '{"name":"Mark"}'
+```
+
+```bash
+ASTRA_TOKEN=<token> ./target/debug/astrad run --workspace ws-dev --me p-dev-mark --node-id n-desk --relay-url http://127.0.0.1:8787
+```
+
+```bash
+VITE_ASTRA_RELAY_URL=http://127.0.0.1:8787 VITE_ASTRA_DEV_AUTH=1 pnpm dev
+```
+
+`pnpm e2e` automates all of this. It signs in, adds a repository and agents, races two builders, merges the
+reviewer's pick, and checks the git result.
+
 ### Web sign-in
 
 The web app signs in with GitHub (or GitLab) through the relay's OAuth device flow. It shows a code, you approve

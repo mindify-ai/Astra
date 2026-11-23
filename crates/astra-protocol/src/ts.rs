@@ -20,7 +20,11 @@ pub fn interface_fields(name: &str) -> Option<Vec<String>> {
     let mut fields = Vec::new();
     for line in body[open + 1..close].lines() {
         let line = line.trim();
-        if line.is_empty() || line.starts_with("/*") || line.starts_with("//") || line.starts_with('*') {
+        if line.is_empty()
+            || line.starts_with("/*")
+            || line.starts_with("//")
+            || line.starts_with('*')
+        {
             continue;
         }
         if let Some((field, _)) = line.split_once(':') {

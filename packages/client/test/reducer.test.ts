@@ -23,6 +23,71 @@ describe('ops conformance (shared with Rust)', () => {
     })
   }
 
+  const permutations = <T>(xs: T[]): T[][] =>
+    xs.length <= 1
+      ? [xs]
+      : xs.flatMap((x, i) => permutations([...xs.slice(0, i), ...xs.slice(i + 1)]).map((p) => [x, ...p]))
+
+  /** Same filter as crates/astra-protocol/tests/fixtures.rs: a patch never precedes the put that created its entity. */
+  const causal = (initial: Entity[], order: Op[]): boolean => {
+    const known = new Set(initial.map((e) => `${e.kind}/${e.id}`))
+    const putSomewhere = (key: string) =>
+      order.some((o) => o.body.type === 'put' && `${o.body.entity.kind}/${o.body.entity.id}` === key)
+    for (const op of order) {
+      if (op.body.type === 'put') known.add(`${op.body.entity.kind}/${op.body.entity.id}`)
+      else if (op.body.type === 'patch') {
+        const key = `${op.body.entityKind}/${op.body.id}`
+        if (putSomewhere(key) && !known.has(key)) return false
+      }
+    }
+    return true
+  }
+
+  for (const c of conformance.cases) {
+    it(`${c.name} (every causal arrival order)`, () => {
+      for (const order of permutations(c.ops as Op[]).filter((o) => causal(c.initial as Entity[], o))) {
+        const state = applyOps(insertEntities(emptyState(), c.initial as Entity[]), newClocks(), order)
+        for (const e of c.expect) {
+          const got = lookup(state, e.kind as EntityKind, e.id) as unknown as
+            | Record<string, unknown>
+            | undefined
+          if (e.fields === null) expect(got).toBeUndefined()
+          else expect(got).toMatchObject(e.fields)
+        }
+      }
+    })
+  }
+
+  it('a patch newer than a concurrent delete revives the entity in any order', () => {
+    const del: Op = {
+      id: 'd',
+      hlc: '0001732180000200:000000:n1',
+      actor: 'n1',
+      body: { type: 'delete', entityKind: 'person', id: 'p-r' },
+    }
+    const patch: Op = {
+      id: 'p',
+      hlc: '0001732180000300:000000:n2',
+      actor: 'n2',
+      body: { type: 'patch', entityKind: 'person', id: 'p-r', fields: { name: 'Back' } },
+    }
+    const seed: Entity[] = [{ kind: 'person', id: 'p-r', name: 'R', initials: 'R' }]
+    for (const order of [
+      [del, patch],
+      [patch, del],
+    ]) {
+      const s = applyOps(insertEntities(emptyState(), seed), newClocks(), order)
+      expect(s.people['p-r']).toMatchObject({ name: 'Back', initials: 'R' })
+    }
+    const older: Op = { ...patch, id: 'p2', hlc: '0001732180000100:000000:n2' }
+    for (const order of [
+      [del, older],
+      [older, del],
+    ]) {
+      expect(applyOps(insertEntities(emptyState(), seed), newClocks(), order).people['p-r']).toBeUndefined()
+    }
+  })
+
   it('converges regardless of op order', () => {
     const all = conformance.cases.flatMap((c) => c.ops as Op[])
     const forward = applyOps(emptyState(), newClocks(), all)

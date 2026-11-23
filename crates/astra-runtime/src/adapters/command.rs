@@ -30,7 +30,8 @@ impl AgentAdapter for CommandAdapter {
                     None => match Supervised::spawn(&command, &args, &ctx.worktree) {
                         Ok(p) => p,
                         Err(e) => {
-                            let _ = ev_tx.send(AgentEvent::Error(format!("failed to start {command}: {e}")));
+                            let _ = ev_tx
+                                .send(AgentEvent::Error(format!("failed to start {command}: {e}")));
                             break;
                         }
                     },
@@ -42,7 +43,9 @@ impl AgentAdapter for CommandAdapter {
                 if let Some(err) = proc.child.stderr.take() {
                     pump_lines(err, ctx.logs.clone(), "stderr: ");
                 }
-                let Some(out) = proc.child.stdout.take() else { break };
+                let Some(out) = proc.child.stdout.take() else {
+                    break;
+                };
                 let mut lines = BufReader::new(out).lines();
                 let mut cancelled = false;
                 loop {
@@ -85,6 +88,9 @@ impl AgentAdapter for CommandAdapter {
             }
             let _ = ev_tx.send(AgentEvent::Exited);
         });
-        Ok(AgentSession { control: ctl_tx, events: ev_rx })
+        Ok(AgentSession {
+            control: ctl_tx,
+            events: ev_rx,
+        })
     }
 }

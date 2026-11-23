@@ -86,7 +86,11 @@ string_enum!(
 
 /// How Astra talks to an agent.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum Adapter {
     /// Agent Client Protocol over the child's stdio.
     Acp { command: String, args: Vec<String> },
@@ -95,12 +99,19 @@ pub enum Adapter {
     /// Any command: prompt on stdin, text on stdout.
     Command { command: String, args: Vec<String> },
     /// The built-in Astra agent.
-    Builtin { provider: ProviderPolicy, model: Option<String> },
+    Builtin {
+        provider: ProviderPolicy,
+        model: Option<String>,
+    },
 }
 
 /// Author of a message.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum Author {
     Person { person_id: String },
     Agent { mission_agent_id: String },
@@ -439,7 +450,10 @@ impl Entity {
         kind: EntityKind,
         mut map: serde_json::Map<String, serde_json::Value>,
     ) -> Result<Entity, serde_json::Error> {
-        map.insert("kind".into(), serde_json::Value::String(kind.as_str().into()));
+        map.insert(
+            "kind".into(),
+            serde_json::Value::String(kind.as_str().into()),
+        );
         serde_json::from_value(serde_json::Value::Object(map))
     }
 }

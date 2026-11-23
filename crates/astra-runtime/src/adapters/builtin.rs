@@ -3,7 +3,10 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use astra_llm::{AgentLoop, AnthropicConfig, LoopEvent, LoopOutcome, Router, RouterConfig, RoutingPolicy, Toolset, Workspace};
+use astra_llm::{
+    AgentLoop, AnthropicConfig, LoopEvent, LoopOutcome, Router, RouterConfig, RoutingPolicy,
+    Toolset, Workspace,
+};
 use astra_protocol::{LogLine, ProviderPolicy};
 use tokio::sync::mpsc;
 
@@ -69,19 +72,22 @@ impl AgentAdapter for BuiltinAdapter {
     fn start(&self, ctx: AgentContext) -> Result<AgentSession, AdapterError> {
         let (ctl_tx, mut ctl_rx) = mpsc::unbounded_channel();
         let (ev_tx, ev_rx) = mpsc::unbounded_channel();
-        let workspace = Workspace::new(&ctx.worktree).map_err(|e| AdapterError::Other(format!("worktree: {e}")))?;
+        let workspace = Workspace::new(&ctx.worktree)
+            .map_err(|e| AdapterError::Other(format!("worktree: {e}")))?;
         let router = Router::new(self.router_config(ctx.secrets.as_ref()));
         tokio::spawn(async move {
             let result: Result<(), String> = async {
                 let provider = router.select().await.map_err(|e| e.to_string())?;
-                ctx.logs.push(format!("built-in agent using {}", provider.name()));
+                ctx.logs
+                    .push(format!("built-in agent using {}", provider.name()));
                 let approver = Arc::new(PolicyApprover {
                     inner: ctx.approver.clone(),
                     policy: ctx.command_policy,
                     worktree: workspace.root().to_path_buf(),
                 });
                 let tools = Toolset::new(workspace, approver);
-                let mut agent = AgentLoop::new(provider, tools, astra_llm::agent::DEFAULT_SYSTEM).map_err(|e| e.to_string())?;
+                let mut agent = AgentLoop::new(provider, tools, astra_llm::agent::DEFAULT_SYSTEM)
+                    .map_err(|e| e.to_string())?;
                 let mut prompt = Some(ctx.prompt.clone());
                 loop {
                     let Some(p) = prompt.take() else {
@@ -100,7 +106,10 @@ impl AgentAdapter for BuiltinAdapter {
                                 LoopEvent::TextDelta(t) => {
                                     let _ = fwd.send(AgentEvent::Text(t));
                                 }
-                                LoopEvent::ToolFinished { log: Some((verb, target)), .. } => {
+                                LoopEvent::ToolFinished {
+                                    log: Some((verb, target)),
+                                    ..
+                                } => {
                                     let _ = fwd.send(AgentEvent::Log(LogLine { verb, target }));
                                 }
                                 _ => {}
@@ -151,6 +160,9 @@ impl AgentAdapter for BuiltinAdapter {
             }
             let _ = ev_tx.send(AgentEvent::Exited);
         });
-        Ok(AgentSession { control: ctl_tx, events: ev_rx })
+        Ok(AgentSession {
+            control: ctl_tx,
+            events: ev_rx,
+        })
     }
 }

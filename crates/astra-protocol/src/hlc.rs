@@ -34,7 +34,11 @@ pub enum HlcParseError {
 impl Hlc {
     /// The zero clock: older than any real timestamp. Initial entities carry this clock.
     pub const fn zero() -> Self {
-        Hlc { ms: 0, counter: 0, node: String::new() }
+        Hlc {
+            ms: 0,
+            counter: 0,
+            node: String::new(),
+        }
     }
 
     /// True for [`Hlc::zero`].
@@ -44,13 +48,21 @@ impl Hlc {
 
     /// Construct a timestamp.
     pub fn new(ms: u64, counter: u32, node: impl Into<String>) -> Self {
-        Hlc { ms, counter, node: node.into() }
+        Hlc {
+            ms,
+            counter,
+            node: node.into(),
+        }
     }
 }
 
 impl Ord for Hlc {
     fn cmp(&self, other: &Self) -> Ordering {
-        (self.ms, self.counter, self.node.as_str()).cmp(&(other.ms, other.counter, other.node.as_str()))
+        (self.ms, self.counter, self.node.as_str()).cmp(&(
+            other.ms,
+            other.counter,
+            other.node.as_str(),
+        ))
     }
 }
 
@@ -77,7 +89,8 @@ impl FromStr for Hlc {
             return Ok(Hlc::zero());
         }
         let mut parts = s.splitn(3, ':');
-        let (Some(ms), Some(counter), Some(node)) = (parts.next(), parts.next(), parts.next()) else {
+        let (Some(ms), Some(counter), Some(node)) = (parts.next(), parts.next(), parts.next())
+        else {
             return Err(HlcParseError::Shape);
         };
         if ms.len() != 16 || !ms.bytes().all(|b| b.is_ascii_digit()) {
@@ -120,7 +133,10 @@ impl HlcClock {
     /// A clock for `node`, starting from zero.
     pub fn new(node: impl Into<String>) -> Self {
         let node = node.into();
-        HlcClock { last: Hlc::new(0, 0, node.clone()), node }
+        HlcClock {
+            last: Hlc::new(0, 0, node.clone()),
+            node,
+        }
     }
 
     /// The node id this clock stamps.

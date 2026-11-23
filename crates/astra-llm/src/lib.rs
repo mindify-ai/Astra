@@ -17,7 +17,9 @@ pub use agent::{AgentLoop, LoopEvent, LoopOutcome};
 pub use anthropic::{AnthropicConfig, AnthropicProvider, Effort};
 pub use openai::{LocalServer, OpenAiCompatProvider, detect_local_servers};
 pub use router::{Router, RouterConfig, RoutingPolicy};
-pub use tools::{AllowAllCommands, CommandApprover, DenyAllCommands, ToolOutcome, Toolset, Workspace};
+pub use tools::{
+    AllowAllCommands, CommandApprover, DenyAllCommands, ToolOutcome, Toolset, Workspace,
+};
 pub use types::*;
 
 /// Errors from providers and the loop.

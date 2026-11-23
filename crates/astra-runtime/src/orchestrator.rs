@@ -10,7 +10,9 @@ use astra_protocol::*;
 use serde_json::{Value, json};
 use tokio::sync::{mpsc, oneshot, watch};
 
-use crate::adapters::{self, AgentAdapter, AgentContext, AgentControl, AgentEvent, Approver, PermissionRequest};
+use crate::adapters::{
+    self, AgentAdapter, AgentContext, AgentControl, AgentEvent, Approver, PermissionRequest,
+};
 use crate::git;
 use crate::policy::{may_decide, may_steer};
 use crate::process::LogRing;
@@ -28,21 +30,11 @@ pub trait NodeHost: Send + Sync + 'static {
     fn has_command_result(&self, command_op: &str) -> bool;
 }
 
-fn read<R>(host: &dyn NodeHost, f: impl FnOnce(&State) -> R) -> R {
-    let mut f = Some(f);
+fn read<R>(host: &dyn NodeHost, f: impl Fn(&State) -> R) -> R {
     let mut out = None;
-    host.with_state(&mut |s| {
-        if let Some(f) = f.take() {
-            out = Some(f(s));
-        }
-    });
-    // `with_state` always calls back exactly once.
-    out.unwrap_or_else(|| unreachable_state())
-}
-
-#[cold]
-fn unreachable_state<R>() -> R {
-    panic!("NodeHost::with_state did not call back")
+    host.with_state(&mut |s| out = Some(f(s)));
+    // A host that does not call back is treated as having an empty state.
+    out.unwrap_or_else(|| f(&State::default()))
 }
 
 /// Builds adapters from protocol adapter configs (override in tests).
@@ -60,7 +52,11 @@ pub struct OrchestratorConfig {
 impl OrchestratorConfig {
     /// Defaults with the standard adapters.
     pub fn new(data_dir: impl Into<PathBuf>, secrets: Arc<dyn SecretStore>) -> Self {
-        OrchestratorConfig { data_dir: data_dir.into(), secrets, adapters: Arc::new(adapters::for_config) }
+        OrchestratorConfig {
+            data_dir: data_dir.into(),
+            secrets,
+            adapters: Arc::new(adapters::for_config),
+        }
     }
 }
 
@@ -145,8 +141,17 @@ impl Orchestrator {
                 if Arc::strong_count(&o.inner) <= 2 {
                     break;
                 }
-                let ids: Vec<String> =
-                    o.inner.streams.lock().map(|s| s.iter().filter(|(_, v)| v.dirty).map(|(k, _)| k.clone()).collect()).unwrap_or_default();
+                let ids: Vec<String> = o
+                    .inner
+                    .streams
+                    .lock()
+                    .map(|s| {
+                        s.iter()
+                            .filter(|(_, v)| v.dirty)
+                            .map(|(k, _)| k.clone())
+                            .collect()
+                    })
+                    .unwrap_or_default();
                 for id in ids {
                     o.flush(&id, false);
                 }
@@ -157,21 +162,30 @@ impl Orchestrator {
 
     /// Queue an op; command ops addressed to this node are executed exactly once, in order.
     pub fn submit(&self, op: &Op) {
-        if let Some((node, _)) = op.as_command() {
-            if node == self.inner.host.node_id() {
-                let _ = self.inner.cmd_tx.send(op.clone());
-            }
+        if let Some((node, _)) = op.as_command()
+            && node == self.inner.host.node_id()
+        {
+            let _ = self.inner.cmd_tx.send(op.clone());
         }
     }
 
     /// Recent log lines of a mission agent's process / session.
     pub fn logs(&self, mission_agent_id: &str) -> Vec<String> {
-        self.inner.logs.lock().ok().and_then(|l| l.get(mission_agent_id).map(LogRing::lines)).unwrap_or_default()
+        self.inner
+            .logs
+            .lock()
+            .ok()
+            .and_then(|l| l.get(mission_agent_id).map(LogRing::lines))
+            .unwrap_or_default()
     }
 
     /// Whether a mission agent has a live session.
     pub fn is_running(&self, mission_agent_id: &str) -> bool {
-        self.inner.agents.lock().map(|a| a.contains_key(mission_agent_id)).unwrap_or(false)
+        self.inner
+            .agents
+            .lock()
+            .map(|a| a.contains_key(mission_agent_id))
+            .unwrap_or(false)
     }
 
     /// Cancel every running agent.
@@ -197,12 +211,16 @@ impl Orchestrator {
     }
 
     async fn execute(&self, op: Op) {
-        let Some((_, command)) = op.as_command() else { return };
+        let Some((_, command)) = op.as_command() else {
+            return;
+        };
         if self.host().has_command_result(&op.id) {
             return;
         }
         {
-            let Ok(mut ex) = self.inner.executing.lock() else { return };
+            let Ok(mut ex) = self.inner.executing.lock() else {
+                return;
+            };
             if !ex.insert(op.id.clone()) {
                 return;
             }
@@ -214,9 +232,17 @@ impl Orchestrator {
             Command::StartMission { mission_id } => self.start_mission(&mission_id),
             Command::Approve { approval_id } => self.decide(&approval_id, &actor, true),
             Command::Deny { approval_id } => self.decide(&approval_id, &actor, false),
-            Command::SendMessage { mission_id, to, body } => self.send_message(&mission_id, to.as_deref(), &body, &actor),
-            Command::TakeSteering { mission_agent_id } => self.take_steering(&mission_agent_id, &actor),
-            Command::ReleaseSteering { mission_agent_id } => self.release_steering(&mission_agent_id, &actor),
+            Command::SendMessage {
+                mission_id,
+                to,
+                body,
+            } => self.send_message(&mission_id, to.as_deref(), &body, &actor),
+            Command::TakeSteering { mission_agent_id } => {
+                self.take_steering(&mission_agent_id, &actor)
+            }
+            Command::ReleaseSteering { mission_agent_id } => {
+                self.release_steering(&mission_agent_id, &actor)
+            }
             Command::Pause { mission_agent_id } => self.pause(&mission_agent_id, true),
             Command::Resume { mission_agent_id } => self.pause(&mission_agent_id, false),
             Command::Merge { result_id } => self.merge(&result_id, &actor).await,
@@ -226,7 +252,11 @@ impl Orchestrator {
         if let Err(e) = &result {
             tracing::warn!(op = %op.id, error = %e, "command failed");
         }
-        self.emit(vec![OpBody::CommandResult { command_op: op.id.clone(), ok: result.is_ok(), error: result.err() }]);
+        self.emit(vec![OpBody::CommandResult {
+            command_op: op.id.clone(),
+            ok: result.is_ok(),
+            error: result.err(),
+        }]);
         if let Ok(mut ex) = self.inner.executing.lock() {
             ex.remove(&op.id);
         }
@@ -245,10 +275,18 @@ impl Orchestrator {
                     .map(|ag| ag.command_policy);
                 may_decide(s, &a.mission_id, actor, policy)
             });
-            let tasks: Vec<String> =
-                s.tasks.values().filter(|t| t.approval_id.as_deref() == Some(approval_id)).map(|t| t.id.clone()).collect();
+            let tasks: Vec<String> = s
+                .tasks
+                .values()
+                .filter(|t| t.approval_id.as_deref() == Some(approval_id))
+                .map(|t| t.id.clone())
+                .collect();
             let other = a.as_ref().is_some_and(|a| {
-                s.approvals.values().any(|o| o.mission_id == a.mission_id && o.id != a.id && o.state == ApprovalState::Pending)
+                s.approvals.values().any(|o| {
+                    o.mission_id == a.mission_id
+                        && o.id != a.id
+                        && o.state == ApprovalState::Pending
+                })
             });
             (a, allowed, tasks, other)
         });
@@ -257,7 +295,10 @@ impl Orchestrator {
             return Err(format!("approval {approval_id} was already decided"));
         }
         if !allowed {
-            return Err(format!("{actor} may not decide approvals in mission {}", approval.mission_id));
+            return Err(format!(
+                "{actor} may not decide approvals in mission {}",
+                approval.mission_id
+            ));
         }
         let mut ops = vec![
             OpBody::patch(
@@ -279,29 +320,53 @@ impl Orchestrator {
             let fields: Vec<(&str, Value)> = if approve {
                 vec![("column", json!("working"))]
             } else {
-                vec![("column", json!("done")), ("note", json!(format!("Denied by {actor}")))]
+                vec![
+                    ("column", json!("done")),
+                    ("note", json!(format!("Denied by {actor}"))),
+                ]
             };
             ops.push(OpBody::patch(EntityKind::Task, t, fields));
         }
         if !other_pending {
-            ops.push(OpBody::patch(EntityKind::Mission, &approval.mission_id, [("status", json!("working"))]));
+            ops.push(OpBody::patch(
+                EntityKind::Mission,
+                &approval.mission_id,
+                [("status", json!("working"))],
+            ));
         }
         self.emit(ops);
-        if let Some(tx) = self.inner.approvals.lock().ok().and_then(|mut a| a.remove(approval_id)) {
+        if let Some(tx) = self
+            .inner
+            .approvals
+            .lock()
+            .ok()
+            .and_then(|mut a| a.remove(approval_id))
+        {
             let _ = tx.send(approve);
         }
         Ok(())
     }
 
-    async fn request_approval(&self, mission_id: &str, ma_id: &str, req: PermissionRequest) -> bool {
+    async fn request_approval(
+        &self,
+        mission_id: &str,
+        ma_id: &str,
+        req: PermissionRequest,
+    ) -> bool {
         self.flush(ma_id, true);
         let approval_id = format!("ap-{}", ulid_suffix());
         let (tx, rx) = oneshot::channel();
         if let Ok(mut a) = self.inner.approvals.lock() {
             a.insert(approval_id.clone(), tx);
         }
-        let task_id = self.inner.task_of.lock().ok().and_then(|t| t.get(ma_id).cloned());
-        let role = read(self.host(), |s| s.mission_agents.get(ma_id).map(|m| m.role)).unwrap_or(Role::Builder);
+        let task_id = self
+            .inner
+            .task_of
+            .lock()
+            .ok()
+            .and_then(|t| t.get(ma_id).cloned());
+        let role = read(self.host(), |s| s.mission_agents.get(ma_id).map(|m| m.role))
+            .unwrap_or(Role::Builder);
         let mut ops = vec![
             OpBody::put(Approval {
                 id: approval_id.clone(),
@@ -313,11 +378,17 @@ impl Orchestrator {
                 decided_by: None,
                 decided_at: None,
             }),
-            OpBody::patch(EntityKind::MissionAgent, ma_id, [("status", json!("needsYou"))]),
+            OpBody::patch(
+                EntityKind::MissionAgent,
+                ma_id,
+                [("status", json!("needsYou"))],
+            ),
             OpBody::put(Message {
                 id: format!("msg-{}", ulid_suffix()),
                 mission_id: mission_id.into(),
-                author: Author::Agent { mission_agent_id: ma_id.into() },
+                author: Author::Agent {
+                    mission_agent_id: ma_id.into(),
+                },
                 steering: None,
                 to: None,
                 body: req.prompt.clone(),
@@ -326,13 +397,20 @@ impl Orchestrator {
                 approval_id: Some(approval_id.clone()),
                 at: now_rfc3339(),
             }),
-            OpBody::patch(EntityKind::Mission, mission_id, [("status", json!("needsYou"))]),
+            OpBody::patch(
+                EntityKind::Mission,
+                mission_id,
+                [("status", json!("needsYou"))],
+            ),
         ];
         match task_id {
             Some(t) => ops.push(OpBody::patch(
                 EntityKind::Task,
                 t,
-                [("column", json!("needsYou")), ("approvalId", json!(approval_id))],
+                [
+                    ("column", json!("needsYou")),
+                    ("approvalId", json!(approval_id)),
+                ],
             )),
             None => ops.push(OpBody::put(Task {
                 id: format!("t-{}", ulid_suffix()),
@@ -353,7 +431,13 @@ impl Orchestrator {
 
     // -------------------------------------------------------------------------------------- steering
 
-    fn send_message(&self, mission_id: &str, to: Option<&str>, body: &str, actor: &str) -> CmdResult {
+    fn send_message(
+        &self,
+        mission_id: &str,
+        to: Option<&str>,
+        body: &str,
+        actor: &str,
+    ) -> CmdResult {
         let (exists, steerable, target) = read(self.host(), |s| {
             (
                 s.missions.contains_key(mission_id),
@@ -369,11 +453,20 @@ impl Orchestrator {
         }
         match to {
             Some(ma_id) => {
-                let ma = target.flatten().filter(|m| m.mission_id == mission_id).ok_or_else(|| format!("unknown agent {ma_id}"))?;
+                let ma = target
+                    .flatten()
+                    .filter(|m| m.mission_id == mission_id)
+                    .ok_or_else(|| format!("unknown agent {ma_id}"))?;
                 match ma.steered_by.as_deref() {
-                    Some(holder) if holder != actor => return Err(format!("steering held by {holder}")),
+                    Some(holder) if holder != actor => {
+                        return Err(format!("steering held by {holder}"));
+                    }
                     Some(_) => {}
-                    None => self.emit(vec![OpBody::patch(EntityKind::MissionAgent, ma_id, [("steeredBy", json!(actor))])]),
+                    None => self.emit(vec![OpBody::patch(
+                        EntityKind::MissionAgent,
+                        ma_id,
+                        [("steeredBy", json!(actor))],
+                    )]),
                 }
                 if !self.deliver(ma_id, body) {
                     return Err(format!("agent {ma_id} is not running"));
@@ -384,7 +477,12 @@ impl Orchestrator {
                     .inner
                     .agents
                     .lock()
-                    .map(|a| a.iter().filter(|(_, l)| l.mission_id == mission_id).map(|(k, _)| k.clone()).collect())
+                    .map(|a| {
+                        a.iter()
+                            .filter(|(_, l)| l.mission_id == mission_id)
+                            .map(|(k, _)| k.clone())
+                            .collect()
+                    })
                     .unwrap_or_default();
                 for id in ids {
                     self.deliver(&id, body);
@@ -400,11 +498,21 @@ impl Orchestrator {
             .agents
             .lock()
             .ok()
-            .and_then(|a| a.get(ma_id).map(|l| l.control.send(AgentControl::Message(body.to_string())).is_ok()))
+            .and_then(|a| {
+                a.get(ma_id).map(|l| {
+                    l.control
+                        .send(AgentControl::Message(body.to_string()))
+                        .is_ok()
+                })
+            })
             .unwrap_or(false);
         if sent {
             self.flush(ma_id, true);
-            self.emit(vec![OpBody::patch(EntityKind::MissionAgent, ma_id, [("status", json!("working"))])]);
+            self.emit(vec![OpBody::patch(
+                EntityKind::MissionAgent,
+                ma_id,
+                [("status", json!("working"))],
+            )]);
         }
         sent
     }
@@ -412,22 +520,33 @@ impl Orchestrator {
     fn take_steering(&self, ma_id: &str, actor: &str) -> CmdResult {
         let (ma, ok) = read(self.host(), |s| {
             let ma = s.mission_agents.get(ma_id).cloned();
-            let ok = ma.as_ref().is_some_and(|m| may_steer(s, &m.mission_id, actor));
+            let ok = ma
+                .as_ref()
+                .is_some_and(|m| may_steer(s, &m.mission_id, actor));
             (ma, ok)
         });
         ma.ok_or_else(|| format!("unknown agent {ma_id}"))?;
         if !ok {
             return Err(format!("{actor} may not steer this mission"));
         }
-        self.emit(vec![OpBody::patch(EntityKind::MissionAgent, ma_id, [("steeredBy", json!(actor))])]);
+        self.emit(vec![OpBody::patch(
+            EntityKind::MissionAgent,
+            ma_id,
+            [("steeredBy", json!(actor))],
+        )]);
         Ok(())
     }
 
     fn release_steering(&self, ma_id: &str, actor: &str) -> CmdResult {
-        let ma = read(self.host(), |s| s.mission_agents.get(ma_id).cloned()).ok_or_else(|| format!("unknown agent {ma_id}"))?;
+        let ma = read(self.host(), |s| s.mission_agents.get(ma_id).cloned())
+            .ok_or_else(|| format!("unknown agent {ma_id}"))?;
         match ma.steered_by.as_deref() {
             Some(h) if h == actor => {
-                self.emit(vec![OpBody::patch(EntityKind::MissionAgent, ma_id, [("steeredBy", Value::Null)])]);
+                self.emit(vec![OpBody::patch(
+                    EntityKind::MissionAgent,
+                    ma_id,
+                    [("steeredBy", Value::Null)],
+                )]);
                 Ok(())
             }
             Some(h) => Err(format!("steering held by {h}")),
@@ -442,7 +561,15 @@ impl Orchestrator {
             .lock()
             .ok()
             .and_then(|a| {
-                a.get(ma_id).map(|l| l.control.send(if pause { AgentControl::Pause } else { AgentControl::Resume }).is_ok())
+                a.get(ma_id).map(|l| {
+                    l.control
+                        .send(if pause {
+                            AgentControl::Pause
+                        } else {
+                            AgentControl::Resume
+                        })
+                        .is_ok()
+                })
             })
             .unwrap_or(false);
         if !sent {
@@ -460,21 +587,36 @@ impl Orchestrator {
     // ---------------------------------------------------------------------------------------- agents
 
     async fn check_agent(&self, agent_id: &str, connect: bool) -> CmdResult {
-        let agent = read(self.host(), |s| s.agents.get(agent_id).cloned()).ok_or_else(|| format!("unknown agent {agent_id}"))?;
+        let agent = read(self.host(), |s| s.agents.get(agent_id).cloned())
+            .ok_or_else(|| format!("unknown agent {agent_id}"))?;
         let check: Result<(), String> = match &agent.adapter {
             None => Err("no adapter configured".into()),
             Some(Adapter::Acp { command, .. }) | Some(Adapter::Command { command, .. }) => {
-                which::which(command).map(|_| ()).map_err(|_| format!("`{command}` was not found on PATH"))
+                which::which(command)
+                    .map(|_| ())
+                    .map_err(|_| format!("`{command}` was not found on PATH"))
             }
             Some(Adapter::Langgraph { endpoint, .. }) => {
                 let url = format!("{}/ok", endpoint.trim_end_matches('/'));
-                match reqwest::Client::builder().timeout(Duration::from_secs(3)).build() {
-                    Ok(http) => http.get(url).send().await.map(|_| ()).map_err(|_| format!("{endpoint} is not reachable")),
+                match reqwest::Client::builder()
+                    .timeout(Duration::from_secs(3))
+                    .build()
+                {
+                    Ok(http) => http
+                        .get(url)
+                        .send()
+                        .await
+                        .map(|_| ())
+                        .map_err(|_| format!("{endpoint} is not reachable")),
                     Err(e) => Err(e.to_string()),
                 }
             }
             Some(Adapter::Builtin { provider, model }) => {
-                let b = adapters::builtin::BuiltinAdapter { policy: *provider, model: model.clone(), router_override: None };
+                let b = adapters::builtin::BuiltinAdapter {
+                    policy: *provider,
+                    model: model.clone(),
+                    router_override: None,
+                };
                 astra_llm::Router::new(b.router_config(self.inner.config.secrets.as_ref()))
                     .select()
                     .await
@@ -482,7 +624,11 @@ impl Orchestrator {
                     .map_err(|e| e.to_string())
             }
         };
-        let status = if check.is_ok() { "connected" } else { "notConnected" };
+        let status = if check.is_ok() {
+            "connected"
+        } else {
+            "notConnected"
+        };
         let mut fields = vec![("status", json!(status))];
         if connect && check.is_ok() {
             fields.push(("nodeId", json!(self.host().node_id())));
@@ -495,21 +641,43 @@ impl Orchestrator {
         self.inner
             .logs
             .lock()
-            .map(|mut l| l.entry(ma_id.to_string()).or_insert_with(|| LogRing::new(500)).clone())
+            .map(|mut l| {
+                l.entry(ma_id.to_string())
+                    .or_insert_with(|| LogRing::new(500))
+                    .clone()
+            })
             .unwrap_or_else(|_| LogRing::new(500))
     }
 
     /// Start a session for a mission agent (or reuse the live one).
-    fn ensure_session(&self, ma: &MissionAgent, prompt: &str, worktree: &std::path::Path) -> Result<bool, String> {
-        if self.inner.agents.lock().map(|a| a.contains_key(&ma.id)).unwrap_or(false) {
+    fn ensure_session(
+        &self,
+        ma: &MissionAgent,
+        prompt: &str,
+        worktree: &std::path::Path,
+    ) -> Result<bool, String> {
+        if self
+            .inner
+            .agents
+            .lock()
+            .map(|a| a.contains_key(&ma.id))
+            .unwrap_or(false)
+        {
             return Ok(false);
         }
         let (adapter, policy) = read(self.host(), |s| {
-            s.agents.get(&ma.agent_id).map(|a| (a.adapter.clone(), a.command_policy))
+            s.agents
+                .get(&ma.agent_id)
+                .map(|a| (a.adapter.clone(), a.command_policy))
         })
         .ok_or_else(|| format!("unknown agent {}", ma.agent_id))?;
-        let adapter = adapter.ok_or_else(|| format!("agent {} has no adapter configured", ma.agent_id))?;
-        let approver = Arc::new(MissionApprover { orch: self.clone(), mission_id: ma.mission_id.clone(), ma_id: ma.id.clone() });
+        let adapter =
+            adapter.ok_or_else(|| format!("agent {} has no adapter configured", ma.agent_id))?;
+        let approver = Arc::new(MissionApprover {
+            orch: self.clone(),
+            mission_id: ma.mission_id.clone(),
+            ma_id: ma.id.clone(),
+        });
         let ctx = AgentContext {
             mission_agent_id: ma.id.clone(),
             role: ma.role,
@@ -520,12 +688,18 @@ impl Orchestrator {
             secrets: self.inner.config.secrets.clone(),
             logs: self.logs_for(&ma.id),
         };
-        let session = (self.inner.config.adapters)(&adapter).start(ctx).map_err(|e| e.to_string())?;
+        let session = (self.inner.config.adapters)(&adapter)
+            .start(ctx)
+            .map_err(|e| e.to_string())?;
         let (turn_tx, turn_rx) = watch::channel(TurnState::default());
         if let Ok(mut a) = self.inner.agents.lock() {
             a.insert(
                 ma.id.clone(),
-                LiveAgent { mission_id: ma.mission_id.clone(), control: session.control, turns: turn_rx },
+                LiveAgent {
+                    mission_id: ma.mission_id.clone(),
+                    control: session.control,
+                    turns: turn_rx,
+                },
             );
         }
         let o = self.clone();
@@ -544,11 +718,19 @@ impl Orchestrator {
         Ok(true)
     }
 
-    fn on_agent_event(&self, mission_id: &str, ma_id: &str, ev: AgentEvent, turns: &watch::Sender<TurnState>) {
+    fn on_agent_event(
+        &self,
+        mission_id: &str,
+        ma_id: &str,
+        ev: AgentEvent,
+        turns: &watch::Sender<TurnState>,
+    ) {
         let mut flush_now = false;
         let mut extra = Vec::new();
         {
-            let Ok(mut streams) = self.inner.streams.lock() else { return };
+            let Ok(mut streams) = self.inner.streams.lock() else {
+                return;
+            };
             let st = streams.entry(ma_id.to_string()).or_default();
             match ev {
                 AgentEvent::Text(t) => {
@@ -573,7 +755,10 @@ impl Orchestrator {
                     extra.push(OpBody::patch(
                         EntityKind::MissionAgent,
                         ma_id,
-                        [("latest", json!(st.latest.iter().cloned().collect::<Vec<_>>()))],
+                        [(
+                            "latest",
+                            json!(st.latest.iter().cloned().collect::<Vec<_>>()),
+                        )],
                     ));
                 }
                 AgentEvent::TurnDone => {
@@ -586,14 +771,20 @@ impl Orchestrator {
                     return;
                 }
                 AgentEvent::Error(e) => {
-                    st.body.push_str(&format!("{}Error: {e}", if st.body.is_empty() { "" } else { "\n\n" }));
+                    st.body.push_str(&format!(
+                        "{}Error: {e}",
+                        if st.body.is_empty() { "" } else { "\n\n" }
+                    ));
                     st.dirty = true;
                     drop(streams);
                     self.flush(ma_id, true);
                     self.emit(vec![OpBody::patch(
                         EntityKind::MissionAgent,
                         ma_id,
-                        [("status", json!("idle")), ("statusDetail", json!(format!("error: {e}")))],
+                        [
+                            ("status", json!("idle")),
+                            ("statusDetail", json!(format!("error: {e}"))),
+                        ],
                     )]);
                     turns.send_modify(|t| {
                         t.seq += 1;
@@ -614,8 +805,12 @@ impl Orchestrator {
     /// Write the agent's in-progress message (put on first write, then patches). `close` ends it.
     fn flush(&self, ma_id: &str, close: bool) {
         let ops = {
-            let Ok(mut streams) = self.inner.streams.lock() else { return };
-            let Some(st) = streams.get_mut(ma_id) else { return };
+            let Ok(mut streams) = self.inner.streams.lock() else {
+                return;
+            };
+            let Some(st) = streams.get_mut(ma_id) else {
+                return;
+            };
             let mut ops = Vec::new();
             if st.dirty {
                 st.dirty = false;
@@ -623,19 +818,27 @@ impl Orchestrator {
                     Some(id) => ops.push(OpBody::patch(
                         EntityKind::Message,
                         id,
-                        [("body", json!(st.body)), ("plan", json!(st.plan)), ("log", json!(st.log))],
+                        [
+                            ("body", json!(st.body)),
+                            ("plan", json!(st.plan)),
+                            ("log", json!(st.log)),
+                        ],
                     )),
                     None => {
-                        let mission_id = read(self.host(), |s| s.mission_agents.get(ma_id).map(|m| m.mission_id.clone()))
-                            .unwrap_or_default();
+                        let mission_id = read(self.host(), |s| {
+                            s.mission_agents.get(ma_id).map(|m| m.mission_id.clone())
+                        })
+                        .unwrap_or_default();
                         let id = format!("msg-{}", ulid_suffix());
                         ops.push(OpBody::put(Message {
                             id: id.clone(),
                             mission_id,
-                            author: Author::Agent { mission_agent_id: ma_id.into() },
+                            author: Author::Agent {
+                                mission_agent_id: ma_id.into(),
+                            },
                             steering: None,
                             to: None,
-                            body: st.body.clone(),
+                            body: st.body.trim_end().to_string(),
                             plan: st.plan.clone(),
                             log: st.log.clone(),
                             approval_id: None,
@@ -661,23 +864,40 @@ impl Orchestrator {
             .streams
             .lock()
             .ok()
-            .and_then(|mut s| s.get_mut(ma_id).map(|st| (std::mem::take(&mut st.turn_text), st.last_plan.clone())))
+            .and_then(|mut s| {
+                s.get_mut(ma_id)
+                    .map(|st| (std::mem::take(&mut st.turn_text), st.last_plan.clone()))
+            })
             .unwrap_or_default()
     }
 
     /// Run one prompt turn of a mission agent in `worktree` and wait for it to finish.
-    async fn run_turn(&self, ma: &MissionAgent, prompt: &str, worktree: &std::path::Path, task_id: Option<&str>) -> Result<String, String> {
+    async fn run_turn(
+        &self,
+        ma: &MissionAgent,
+        prompt: &str,
+        worktree: &std::path::Path,
+        task_id: Option<&str>,
+    ) -> Result<String, String> {
         if let Some(t) = task_id {
             if let Ok(mut m) = self.inner.task_of.lock() {
                 m.insert(ma.id.clone(), t.to_string());
             }
-            self.emit(vec![OpBody::patch(EntityKind::Task, t, [("column", json!("working"))])]);
+            self.emit(vec![OpBody::patch(
+                EntityKind::Task,
+                t,
+                [("column", json!("working"))],
+            )]);
         }
         let mut fields = vec![("status", json!("working")), ("statusDetail", Value::Null)];
         if ma.started_at.is_none() {
             fields.push(("startedAt", json!(now_rfc3339())));
         }
-        self.emit(vec![OpBody::patch(EntityKind::MissionAgent, &ma.id, fields)]);
+        self.emit(vec![OpBody::patch(
+            EntityKind::MissionAgent,
+            &ma.id,
+            fields,
+        )]);
         let _ = self.take_turn_text(&ma.id);
         let fresh = self.ensure_session(ma, prompt, worktree)?;
         let mut rx = self
@@ -711,15 +931,27 @@ impl Orchestrator {
         let (text, _) = self.take_turn_text(&ma.id);
         match &outcome {
             Ok(()) => {
-                let mut ops = vec![OpBody::patch(EntityKind::MissionAgent, &ma.id, [("status", json!("done"))])];
+                let mut ops = vec![OpBody::patch(
+                    EntityKind::MissionAgent,
+                    &ma.id,
+                    [("status", json!("done"))],
+                )];
                 if let Some(t) = task_id {
-                    ops.push(OpBody::patch(EntityKind::Task, t, [("column", json!("done"))]));
+                    ops.push(OpBody::patch(
+                        EntityKind::Task,
+                        t,
+                        [("column", json!("done"))],
+                    ));
                 }
                 self.emit(ops);
             }
             Err(e) => {
                 if let Some(t) = task_id {
-                    self.emit(vec![OpBody::patch(EntityKind::Task, t, [("note", json!(format!("Failed: {e}")))])]);
+                    self.emit(vec![OpBody::patch(
+                        EntityKind::Task,
+                        t,
+                        [("note", json!(format!("Failed: {e}")))],
+                    )]);
                 }
             }
         }
@@ -728,25 +960,46 @@ impl Orchestrator {
 
     // -------------------------------------------------------------------------------------- missions
 
-    fn mission_context(&self, mission_id: &str) -> Result<(Mission, Repository, Vec<MissionAgent>, PathBuf), String> {
+    fn mission_context(
+        &self,
+        mission_id: &str,
+    ) -> Result<(Mission, Repository, Vec<MissionAgent>, PathBuf), String> {
         let (mission, repo, agents, adapters_ok) = read(self.host(), |s| {
             let m = s.missions.get(mission_id).cloned();
-            let r = m.as_ref().and_then(|m| s.repositories.get(&m.repo_id).cloned());
-            let mut a: Vec<MissionAgent> =
-                s.mission_agents.values().filter(|ma| ma.mission_id == mission_id && ma.enabled).cloned().collect();
+            let r = m
+                .as_ref()
+                .and_then(|m| s.repositories.get(&m.repo_id).cloned());
+            let mut a: Vec<MissionAgent> = s
+                .mission_agents
+                .values()
+                .filter(|ma| ma.mission_id == mission_id && ma.enabled)
+                .cloned()
+                .collect();
             a.sort_by_key(|ma| (role_rank(ma.role), ma.id.clone()));
             let missing: Vec<String> = a
                 .iter()
-                .filter(|ma| s.agents.get(&ma.agent_id).and_then(|ag| ag.adapter.as_ref()).is_none())
+                .filter(|ma| {
+                    s.agents
+                        .get(&ma.agent_id)
+                        .and_then(|ag| ag.adapter.as_ref())
+                        .is_none()
+                })
                 .map(|ma| ma.agent_id.clone())
                 .collect();
             (m, r, a, missing)
         });
         let mission = mission.ok_or_else(|| format!("unknown mission {mission_id}"))?;
         let repo = repo.ok_or_else(|| format!("unknown repository {}", mission.repo_id))?;
-        let path = repo.path.as_deref().map(git::expand_home).ok_or_else(|| format!("repository {} has no local path", repo.name))?;
+        let path = repo
+            .path
+            .as_deref()
+            .map(git::expand_home)
+            .ok_or_else(|| format!("repository {} has no local path", repo.name))?;
         if !adapters_ok.is_empty() {
-            return Err(format!("agents without an adapter: {}", adapters_ok.join(", ")));
+            return Err(format!(
+                "agents without an adapter: {}",
+                adapters_ok.join(", ")
+            ));
         }
         if agents.is_empty() {
             return Err("the mission has no enabled agents".into());
@@ -756,12 +1009,20 @@ impl Orchestrator {
     }
 
     fn worktree_dir(&self, mission_id: &str, name: &str) -> PathBuf {
-        self.inner.config.data_dir.join("worktrees").join(sanitize(mission_id)).join(sanitize(name))
+        self.inner
+            .config
+            .data_dir
+            .join("worktrees")
+            .join(sanitize(mission_id))
+            .join(sanitize(name))
     }
 
     fn start_mission(&self, mission_id: &str) -> CmdResult {
         let (mission, repo, agents, path) = self.mission_context(mission_id)?;
-        if !matches!(mission.status, MissionStatus::Draft | MissionStatus::NeedsYou | MissionStatus::Working) {
+        if !matches!(
+            mission.status,
+            MissionStatus::Draft | MissionStatus::NeedsYou | MissionStatus::Working
+        ) {
             return Err(format!("mission {mission_id} is {:?}", mission.status));
         }
         if mission.mode == MissionMode::Race && !agents.iter().any(|a| a.role == Role::Builder) {
@@ -770,7 +1031,10 @@ impl Orchestrator {
         self.emit(vec![OpBody::patch(
             EntityKind::Mission,
             mission_id,
-            [("status", json!("working")), ("nodeId", json!(self.host().node_id()))],
+            [
+                ("status", json!("working")),
+                ("nodeId", json!(self.host().node_id())),
+            ],
         )]);
         let o = self.clone();
         tokio::spawn(async move {
@@ -785,7 +1049,9 @@ impl Orchestrator {
                     OpBody::put(Message {
                         id: format!("msg-{}", ulid_suffix()),
                         mission_id: mission.id.clone(),
-                        author: Author::Agent { mission_agent_id: author },
+                        author: Author::Agent {
+                            mission_agent_id: author,
+                        },
                         steering: None,
                         to: None,
                         body: format!("The mission stopped: {e}"),
@@ -794,14 +1060,26 @@ impl Orchestrator {
                         approval_id: None,
                         at: now_rfc3339(),
                     }),
-                    OpBody::patch(EntityKind::Mission, &mission.id, [("status", json!("needsYou"))]),
+                    OpBody::patch(
+                        EntityKind::Mission,
+                        &mission.id,
+                        [("status", json!("needsYou"))],
+                    ),
                 ]);
             }
         });
         Ok(())
     }
 
-    fn new_task(&self, mission: &Mission, ma: Option<&MissionAgent>, role: Role, title: String, column: TaskColumn, order: i64) -> String {
+    fn new_task(
+        &self,
+        mission: &Mission,
+        ma: Option<&MissionAgent>,
+        role: Role,
+        title: String,
+        column: TaskColumn,
+        order: i64,
+    ) -> String {
         let id = format!("t-{}", ulid_suffix());
         self.emit(vec![OpBody::put(Task {
             id: id.clone(),
@@ -818,31 +1096,72 @@ impl Orchestrator {
         id
     }
 
-    async fn run_split(&self, mission: &Mission, _repo: &Repository, agents: &[MissionAgent], path: &std::path::Path) -> CmdResult {
+    async fn run_split(
+        &self,
+        mission: &Mission,
+        _repo: &Repository,
+        agents: &[MissionAgent],
+        path: &std::path::Path,
+    ) -> CmdResult {
         let wt_dir = self.worktree_dir(&mission.id, "main");
-        let (p, base, branch, d) = (path.to_path_buf(), mission.base_branch.clone(), mission.branch.clone(), wt_dir.clone());
-        let worktree = blocking(move || git::create_worktree(&p, &base, &branch, &d).map_err(|e| e.to_string())).await?;
+        let (p, base, branch, d) = (
+            path.to_path_buf(),
+            mission.base_branch.clone(),
+            mission.branch.clone(),
+            wt_dir.clone(),
+        );
+        let worktree = blocking(move || {
+            git::create_worktree(&p, &base, &branch, &d).map_err(|e| e.to_string())
+        })
+        .await?;
         self.emit(
             agents
                 .iter()
-                .map(|a| OpBody::patch(EntityKind::MissionAgent, &a.id, [("branch", json!(mission.branch))]))
+                .map(|a| {
+                    OpBody::patch(
+                        EntityKind::MissionAgent,
+                        &a.id,
+                        [("branch", json!(mission.branch))],
+                    )
+                })
                 .collect(),
         );
 
         let mut plan_text = String::new();
         let mut order = 1;
         if let Some(planner) = agents.iter().find(|a| a.role == Role::Planner) {
-            let title = planner.task.clone().unwrap_or_else(|| format!("Plan: {}", mission.title));
-            let task = self.new_task(mission, Some(planner), Role::Planner, title, TaskColumn::Queued, order);
+            let title = planner
+                .task
+                .clone()
+                .unwrap_or_else(|| format!("Plan: {}", mission.title));
+            let task = self.new_task(
+                mission,
+                Some(planner),
+                Role::Planner,
+                title,
+                TaskColumn::Queued,
+                order,
+            );
             order += 1;
-            let text = self.run_turn(planner, &prompt_for(Role::Planner, mission, ""), &worktree, Some(&task)).await?;
+            let text = self
+                .run_turn(
+                    planner,
+                    &prompt_for(Role::Planner, mission, ""),
+                    &worktree,
+                    Some(&task),
+                )
+                .await?;
             let (_, plan) = self.take_turn_text(&planner.id);
             plan_text = render_plan(&plan, &text);
         }
-        let workers: Vec<&MissionAgent> = agents.iter().filter(|a| a.role != Role::Planner).collect();
+        let workers: Vec<&MissionAgent> =
+            agents.iter().filter(|a| a.role != Role::Planner).collect();
         let mut queue = Vec::new();
         for ma in &workers {
-            let title = ma.task.clone().unwrap_or_else(|| default_task_title(ma.role, &mission.title));
+            let title = ma
+                .task
+                .clone()
+                .unwrap_or_else(|| default_task_title(ma.role, &mission.title));
             let task = self.new_task(mission, Some(ma), ma.role, title, TaskColumn::Queued, order);
             order += 1;
             queue.push(((*ma).clone(), task));
@@ -856,13 +1175,25 @@ impl Orchestrator {
             } else if ma.role == Role::Builder {
                 result_agent = ma.id.clone();
             }
-            self.run_turn(&ma, &prompt_for(ma.role, mission, &plan_text), &worktree, Some(&task)).await?;
+            self.run_turn(
+                &ma,
+                &prompt_for(ma.role, mission, &plan_text),
+                &worktree,
+                Some(&task),
+            )
+            .await?;
         }
 
         let (wt, msg) = (worktree.clone(), format!("astra: {}", mission.title));
         blocking(move || git::commit_all(&wt, &msg).map_err(|e| e.to_string())).await?;
-        let (p, base, branch) = (path.to_path_buf(), mission.base_branch.clone(), mission.branch.clone());
-        let (stats, diff) = blocking(move || git::diff_branch(&p, &base, &branch).map_err(|e| e.to_string())).await?;
+        let (p, base, branch) = (
+            path.to_path_buf(),
+            mission.base_branch.clone(),
+            mission.branch.clone(),
+        );
+        let (stats, diff) =
+            blocking(move || git::diff_branch(&p, &base, &branch).map_err(|e| e.to_string()))
+                .await?;
         self.emit(vec![
             OpBody::put(MissionResult {
                 id: format!("res-{}", mission.id),
@@ -875,25 +1206,62 @@ impl Orchestrator {
                 reviewer_pick: false,
                 diff,
             }),
-            OpBody::patch(EntityKind::Mission, &mission.id, [("stats", json!(stats)), ("status", json!("needsYou"))]),
+            OpBody::patch(
+                EntityKind::Mission,
+                &mission.id,
+                [("stats", json!(stats)), ("status", json!("needsYou"))],
+            ),
         ]);
-        self.new_task(mission, None, Role::Reviewer, format!("Review and merge {}", mission.short_name), TaskColumn::NeedsYou, order);
+        self.new_task(
+            mission,
+            None,
+            Role::Reviewer,
+            format!("Review and merge {}", mission.short_name),
+            TaskColumn::NeedsYou,
+            order,
+        );
         Ok(())
     }
 
-    async fn run_race(&self, mission: &Mission, _repo: &Repository, agents: &[MissionAgent], path: &std::path::Path) -> CmdResult {
-        let builders: Vec<&MissionAgent> = agents.iter().filter(|a| a.role == Role::Builder).collect();
+    async fn run_race(
+        &self,
+        mission: &Mission,
+        _repo: &Repository,
+        agents: &[MissionAgent],
+        path: &std::path::Path,
+    ) -> CmdResult {
+        let builders: Vec<&MissionAgent> =
+            agents.iter().filter(|a| a.role == Role::Builder).collect();
         let mut runs = Vec::new();
         let mut entries = Vec::new();
         for (i, ma) in builders.iter().enumerate() {
             let label = label_for(i);
             let branch = format!("{}-{}", mission.branch, label.to_lowercase());
             let dir = self.worktree_dir(&mission.id, &label);
-            let (p, base, b, d) = (path.to_path_buf(), mission.base_branch.clone(), branch.clone(), dir);
-            let wt = blocking(move || git::create_worktree(&p, &base, &b, &d).map_err(|e| e.to_string())).await?;
-            self.emit(vec![OpBody::patch(EntityKind::MissionAgent, &ma.id, [("branch", json!(branch))])]);
+            let (p, base, b, d) = (
+                path.to_path_buf(),
+                mission.base_branch.clone(),
+                branch.clone(),
+                dir,
+            );
+            let wt = blocking(move || {
+                git::create_worktree(&p, &base, &b, &d).map_err(|e| e.to_string())
+            })
+            .await?;
+            self.emit(vec![OpBody::patch(
+                EntityKind::MissionAgent,
+                &ma.id,
+                [("branch", json!(branch))],
+            )]);
             let title = ma.task.clone().unwrap_or_else(|| mission.title.clone());
-            let task = self.new_task(mission, Some(ma), Role::Builder, title, TaskColumn::Queued, i as i64 + 1);
+            let task = self.new_task(
+                mission,
+                Some(ma),
+                Role::Builder,
+                title,
+                TaskColumn::Queued,
+                i as i64 + 1,
+            );
             entries.push(((*ma).clone(), label, branch, wt.clone()));
             let o = self.clone();
             let ma = (*ma).clone();
@@ -911,8 +1279,14 @@ impl Orchestrator {
             let msg = format!("astra: {} ({label})", mission.title);
             let w = wt.clone();
             blocking(move || git::commit_all(&w, &msg).map_err(|e| e.to_string())).await?;
-            let (p, base, b) = (path.to_path_buf(), mission.base_branch.clone(), branch.clone());
-            let (stats, diff) = blocking(move || git::diff_branch(&p, &base, &b).map_err(|e| e.to_string())).await?;
+            let (p, base, b) = (
+                path.to_path_buf(),
+                mission.base_branch.clone(),
+                branch.clone(),
+            );
+            let (stats, diff) =
+                blocking(move || git::diff_branch(&p, &base, &b).map_err(|e| e.to_string()))
+                    .await?;
             let r = MissionResult {
                 id: format!("res-{}-{}", mission.id, label.to_lowercase()),
                 mission_id: mission.id.clone(),
@@ -934,16 +1308,30 @@ impl Orchestrator {
         if let Some(reviewer) = agents.iter().find(|a| a.role == Role::Reviewer) {
             let dir = self.worktree_dir(&mission.id, "review");
             std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-            let title = reviewer.task.clone().unwrap_or_else(|| format!("Compare the {} results", results.len()));
-            let task = self.new_task(mission, Some(reviewer), Role::Reviewer, title, TaskColumn::Queued, results.len() as i64 + 1);
+            let title = reviewer
+                .task
+                .clone()
+                .unwrap_or_else(|| format!("Compare the {} results", results.len()));
+            let task = self.new_task(
+                mission,
+                Some(reviewer),
+                Role::Reviewer,
+                title,
+                TaskColumn::Queued,
+                results.len() as i64 + 1,
+            );
             let prompt = review_prompt(mission, &results);
             match self.run_turn(reviewer, &prompt, &dir, Some(&task)).await {
                 Ok(text) => {
                     let labels: Vec<String> = results.iter().map(|r| r.label.clone()).collect();
-                    if let Some(pick) = parse_pick(&text, &labels) {
-                        if let Some(r) = results.iter().find(|r| r.label == pick) {
-                            self.emit(vec![OpBody::patch(EntityKind::Result, &r.id, [("reviewerPick", json!(true))])]);
-                        }
+                    if let Some(pick) = parse_pick(&text, &labels)
+                        && let Some(r) = results.iter().find(|r| r.label == pick)
+                    {
+                        self.emit(vec![OpBody::patch(
+                            EntityKind::Result,
+                            &r.id,
+                            [("reviewerPick", json!(true))],
+                        )]);
                     }
                 }
                 Err(e) => tracing::warn!(error = %e, "reviewer failed"),
@@ -957,19 +1345,31 @@ impl Orchestrator {
             TaskColumn::NeedsYou,
             results.len() as i64 + 2,
         );
-        self.emit(vec![OpBody::patch(EntityKind::Mission, &mission.id, [("status", json!("needsYou"))])]);
+        self.emit(vec![OpBody::patch(
+            EntityKind::Mission,
+            &mission.id,
+            [("status", json!("needsYou"))],
+        )]);
         Ok(())
     }
 
     async fn merge(&self, result_id: &str, actor: &str) -> CmdResult {
         let (result, mission, repo, others, tasks, allowed) = read(self.host(), |s| {
             let r = s.results.get(result_id).cloned();
-            let m = r.as_ref().and_then(|r| s.missions.get(&r.mission_id).cloned());
-            let repo = m.as_ref().and_then(|m| s.repositories.get(&m.repo_id).cloned());
+            let m = r
+                .as_ref()
+                .and_then(|r| s.missions.get(&r.mission_id).cloned());
+            let repo = m
+                .as_ref()
+                .and_then(|m| s.repositories.get(&m.repo_id).cloned());
             let others: Vec<String> = r
                 .as_ref()
                 .map(|r| {
-                    s.results.values().filter(|o| o.mission_id == r.mission_id && o.id != r.id).map(|o| o.branch.clone()).collect()
+                    s.results
+                        .values()
+                        .filter(|o| o.mission_id == r.mission_id && o.id != r.id)
+                        .map(|o| o.branch.clone())
+                        .collect()
                 })
                 .unwrap_or_default();
             let tasks: Vec<String> = r
@@ -977,12 +1377,18 @@ impl Orchestrator {
                 .map(|r| {
                     s.tasks
                         .values()
-                        .filter(|t| t.mission_id == r.mission_id && t.column == TaskColumn::NeedsYou && t.approval_id.is_none())
+                        .filter(|t| {
+                            t.mission_id == r.mission_id
+                                && t.column == TaskColumn::NeedsYou
+                                && t.approval_id.is_none()
+                        })
                         .map(|t| t.id.clone())
                         .collect()
                 })
                 .unwrap_or_default();
-            let allowed = r.as_ref().is_some_and(|r| may_decide(s, &r.mission_id, actor, None));
+            let allowed = r
+                .as_ref()
+                .is_some_and(|r| may_decide(s, &r.mission_id, actor, None));
             (r, m, repo, others, tasks, allowed)
         });
         let result = result.ok_or_else(|| format!("unknown result {result_id}"))?;
@@ -994,24 +1400,52 @@ impl Orchestrator {
         if mission.status == MissionStatus::Merged {
             return Err(format!("mission {} is already merged", mission.id));
         }
-        let path = repo.path.as_deref().map(git::expand_home).ok_or_else(|| format!("repository {} has no local path", repo.name))?;
+        let path = repo
+            .path
+            .as_deref()
+            .map(git::expand_home)
+            .ok_or_else(|| format!("repository {} has no local path", repo.name))?;
 
         // Stop the mission's agents and remove its worktrees (branches are kept).
         let live: Vec<String> = self
             .inner
             .agents
             .lock()
-            .map(|a| a.iter().filter(|(_, l)| l.mission_id == mission.id).map(|(k, _)| k.clone()).collect())
+            .map(|a| {
+                a.iter()
+                    .filter(|(_, l)| l.mission_id == mission.id)
+                    .map(|(k, _)| k.clone())
+                    .collect()
+            })
             .unwrap_or_default();
         for id in live {
-            if let Some(l) = self.inner.agents.lock().ok().and_then(|mut a| a.remove(&id)) {
+            if let Some(l) = self
+                .inner
+                .agents
+                .lock()
+                .ok()
+                .and_then(|mut a| a.remove(&id))
+            {
                 let _ = l.control.send(AgentControl::Cancel);
             }
         }
-        let message = format!("Merge {} (mission {}: {})", result.branch, mission.number, mission.title);
-        let (p, b, into) = (path.clone(), result.branch.clone(), mission.base_branch.clone());
-        blocking(move || git::merge_branch(&p, &b, &into, &message).map_err(|e| e.to_string())).await?;
-        let wt_root = self.inner.config.data_dir.join("worktrees").join(sanitize(&mission.id));
+        let message = format!(
+            "Merge {} (mission {}: {})",
+            result.branch, mission.number, mission.title
+        );
+        let (p, b, into) = (
+            path.clone(),
+            result.branch.clone(),
+            mission.base_branch.clone(),
+        );
+        blocking(move || git::merge_branch(&p, &b, &into, &message).map_err(|e| e.to_string()))
+            .await?;
+        let wt_root = self
+            .inner
+            .config
+            .data_dir
+            .join("worktrees")
+            .join(sanitize(&mission.id));
         let p = path.clone();
         let _ = blocking(move || -> Result<(), String> {
             if let Ok(rd) = std::fs::read_dir(&wt_root) {
@@ -1037,10 +1471,18 @@ impl Orchestrator {
                 kept_branches: others,
                 at: now_rfc3339(),
             }),
-            OpBody::patch(EntityKind::Mission, &mission.id, [("status", json!("merged")), ("stats", json!(result.stats))]),
+            OpBody::patch(
+                EntityKind::Mission,
+                &mission.id,
+                [("status", json!("merged")), ("stats", json!(result.stats))],
+            ),
         ];
         for t in tasks {
-            ops.push(OpBody::patch(EntityKind::Task, t, [("column", json!("done")), ("mergedBy", json!(actor))]));
+            ops.push(OpBody::patch(
+                EntityKind::Task,
+                t,
+                [("column", json!("done")), ("mergedBy", json!(actor))],
+            ));
         }
         self.emit(ops);
         Ok(())
@@ -1057,17 +1499,26 @@ struct MissionApprover {
 #[async_trait::async_trait]
 impl Approver for MissionApprover {
     async fn request(&self, req: PermissionRequest) -> bool {
-        self.orch.request_approval(&self.mission_id, &self.ma_id, req).await
+        self.orch
+            .request_approval(&self.mission_id, &self.ma_id, req)
+            .await
     }
 }
 
-async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T, String> + Send + 'static) -> Result<T, String> {
-    tokio::task::spawn_blocking(f).await.map_err(|e| e.to_string())?
+async fn blocking<T: Send + 'static>(
+    f: impl FnOnce() -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    tokio::task::spawn_blocking(f)
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 fn git2_check(path: &std::path::Path, base: &str) -> Result<(), String> {
     if !git::branch_exists(path, base) {
-        return Err(format!("{} is not a git repository with branch {base}", path.display()));
+        return Err(format!(
+            "{} is not a git repository with branch {base}",
+            path.display()
+        ));
     }
     Ok(())
 }
@@ -1083,7 +1534,15 @@ fn role_rank(r: Role) -> u8 {
 }
 
 fn sanitize(s: &str) -> String {
-    s.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '-' }).collect()
+    s.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect()
 }
 
 /// `A`, `B`, ... `Z`, `AA`, ...
@@ -1114,21 +1573,38 @@ fn render_plan(plan: &[PlanStep], text: &str) -> String {
     if plan.is_empty() {
         return text.trim().to_string();
     }
-    plan.iter().enumerate().map(|(i, p)| format!("{}. {}", i + 1, p.text)).collect::<Vec<_>>().join("\n")
+    plan.iter()
+        .enumerate()
+        .map(|(i, p)| format!("{}. {}", i + 1, p.text))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// The prompt for a role.
 pub fn prompt_for(role: Role, mission: &Mission, plan: &str) -> String {
-    let plan = if plan.is_empty() { String::new() } else { format!("\n\nThe plan:\n{plan}") };
+    let plan = if plan.is_empty() {
+        String::new()
+    } else {
+        format!("\n\nThe plan:\n{plan}")
+    };
     match role {
         Role::Planner => format!(
             "Goal: {}\n\nYou are the planner. Read the code and write a short, numbered plan that the builder, tester \
              and reviewer will follow. Do not change files.",
             mission.goal
         ),
-        Role::Builder => format!("Goal: {}{plan}\n\nYou are the builder. Make the change in this worktree.", mission.goal),
-        Role::Tester => format!("Goal: {}{plan}\n\nYou are the tester. Add or run tests for the change and fix what fails.", mission.goal),
-        Role::Writer => format!("Goal: {}{plan}\n\nYou are the writer. Update the documentation for the change.", mission.goal),
+        Role::Builder => format!(
+            "Goal: {}{plan}\n\nYou are the builder. Make the change in this worktree.",
+            mission.goal
+        ),
+        Role::Tester => format!(
+            "Goal: {}{plan}\n\nYou are the tester. Add or run tests for the change and fix what fails.",
+            mission.goal
+        ),
+        Role::Writer => format!(
+            "Goal: {}{plan}\n\nYou are the writer. Update the documentation for the change.",
+            mission.goal
+        ),
         Role::Reviewer => format!(
             "Goal: {}{plan}\n\nYou are the reviewer. Review the change on this branch and point out problems.",
             mission.goal
@@ -1166,17 +1642,26 @@ fn review_prompt(mission: &Mission, results: &[MissionResult]) -> String {
 
 /// Find the reviewer's pick (`Pick: B`, `merge A`, ...) among `labels`.
 pub fn parse_pick(text: &str, labels: &[String]) -> Option<String> {
-    let alts = labels.iter().map(|l| regex::escape(l)).collect::<Vec<_>>().join("|");
+    let alts = labels
+        .iter()
+        .map(|l| regex::escape(l))
+        .collect::<Vec<_>>()
+        .join("|");
     let strong = regex::Regex::new(&format!(
         r"(?i)\b(?:pick|merge|choose|prefer|recommend|go with)\b[^A-Za-z0-9]*(?:result\s+)?\b({alts})\b"
     ))
     .ok()?;
     if let Some(c) = strong.captures(text) {
         let found = c.get(1)?.as_str();
-        return labels.iter().find(|l| l.eq_ignore_ascii_case(found)).cloned();
+        return labels
+            .iter()
+            .find(|l| l.eq_ignore_ascii_case(found))
+            .cloned();
     }
     let weak = regex::Regex::new(&format!(r"\b(?:result\s+)?({alts})\b")).ok()?;
-    weak.captures(text).and_then(|c| c.get(1)).map(|m| m.as_str().to_string())
+    weak.captures(text)
+        .and_then(|c| c.get(1))
+        .map(|m| m.as_str().to_string())
 }
 
 #[cfg(test)]
@@ -1189,9 +1674,18 @@ mod tests {
         assert_eq!(label_for(1), "B");
         assert_eq!(label_for(26), "AA");
         let labels = vec!["A".to_string(), "B".to_string()];
-        assert_eq!(parse_pick("Pick: B\nIt is smaller.", &labels).as_deref(), Some("B"));
-        assert_eq!(parse_pick("I would merge A now and keep B as a follow-up.", &labels).as_deref(), Some("A"));
-        assert_eq!(parse_pick("Result B is cleaner.", &labels).as_deref(), Some("B"));
+        assert_eq!(
+            parse_pick("Pick: B\nIt is smaller.", &labels).as_deref(),
+            Some("B")
+        );
+        assert_eq!(
+            parse_pick("I would merge A now and keep B as a follow-up.", &labels).as_deref(),
+            Some("A")
+        );
+        assert_eq!(
+            parse_pick("Result B is cleaner.", &labels).as_deref(),
+            Some("B")
+        );
         assert_eq!(parse_pick("no idea", &labels), None);
     }
 }

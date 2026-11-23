@@ -43,7 +43,11 @@ impl EntityClock {
 
     /// Newest field clock (zero if none).
     pub fn newest(&self) -> Hlc {
-        self.fields.values().max().cloned().unwrap_or_else(Hlc::zero)
+        self.fields
+            .values()
+            .max()
+            .cloned()
+            .unwrap_or_else(Hlc::zero)
     }
 
     fn visible(&self) -> bool {
@@ -104,18 +108,35 @@ pub fn apply_body(state: &mut State, clocks: &mut Clocks, hlc: &Hlc, body: &OpBo
             incoming.remove("kind");
             write_fields(state, clocks, kind, id, hlc, incoming, true)
         }
-        OpBody::Patch { entity_kind, id, fields } => {
+        OpBody::Patch {
+            entity_kind,
+            id,
+            fields,
+        } => {
             let mut incoming: Map<String, Value> = fields.clone().into_iter().collect();
             incoming.remove("kind");
             incoming.remove("id");
-            write_fields(state, clocks, *entity_kind, id.clone(), hlc, incoming, false)
+            write_fields(
+                state,
+                clocks,
+                *entity_kind,
+                id.clone(),
+                hlc,
+                incoming,
+                false,
+            )
         }
         OpBody::Delete { entity_kind, id } => delete(state, clocks, *entity_kind, id.clone(), hlc),
         OpBody::Command { .. } | OpBody::CommandResult { .. } => Effect::NoChange,
     }
 }
 
-fn current_data(state: &State, clock: Option<&EntityClock>, kind: EntityKind, id: &str) -> Option<Map<String, Value>> {
+fn current_data(
+    state: &State,
+    clock: Option<&EntityClock>,
+    kind: EntityKind,
+    id: &str,
+) -> Option<Map<String, Value>> {
     if let Some(e) = state.get(kind, id) {
         let mut m = e.to_json();
         m.remove("kind");
@@ -178,19 +199,25 @@ fn write_fields(
     Effect::Changed(kind, id)
 }
 
-fn delete(state: &mut State, clocks: &mut Clocks, kind: EntityKind, id: String, hlc: &Hlc) -> Effect {
+fn delete(
+    state: &mut State,
+    clocks: &mut Clocks,
+    kind: EntityKind,
+    id: String,
+    hlc: &Hlc,
+) -> Effect {
     let key = (kind, id.clone());
     let mut clock = clocks.entities.get(&key).cloned().unwrap_or_default();
     if clock.tombstone.as_ref().is_some_and(|t| t >= hlc) {
         return Effect::NoChange;
     }
     clock.tombstone = Some(hlc.clone());
-    if !clock.visible() {
-        if let Some(entity) = state.remove(kind, &id) {
-            let mut m = entity.to_json();
-            m.remove("kind");
-            clock.hidden = Some(m);
-        }
+    if !clock.visible()
+        && let Some(entity) = state.remove(kind, &id)
+    {
+        let mut m = entity.to_json();
+        m.remove("kind");
+        clock.hidden = Some(m);
     }
     clocks.entities.insert(key, clock);
     Effect::Changed(kind, id)
@@ -206,7 +233,10 @@ pub struct Reducer {
 impl Reducer {
     /// A reducer over an initial state (initial entities carry clock zero).
     pub fn new(state: State) -> Reducer {
-        Reducer { state, clocks: Clocks::new() }
+        Reducer {
+            state,
+            clocks: Clocks::new(),
+        }
     }
 
     /// Apply one op.

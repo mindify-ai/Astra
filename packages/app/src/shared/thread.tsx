@@ -34,7 +34,7 @@ export function ApprovalActions({ approval, variant }: { approval: Approval; var
       </Status>
     )
   }
-  if (!canApprove(s, s.me, approval.missionId)) {
+  if (!canApprove(s, s.me, approval.missionId, approval.missionAgentId)) {
     const owner = s.missions[approval.missionId]?.ownerId ?? null
     return (
       <p className="m-0 mt-2 text-[13px] text-ink-muted">Waiting for {personName(s, owner)} to approve.</p>

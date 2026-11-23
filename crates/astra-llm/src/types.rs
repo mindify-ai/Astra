@@ -12,9 +12,19 @@ pub enum ChatRole {
 /// A content block.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Block {
-    Text { text: String },
-    ToolUse { id: String, name: String, input: Value },
-    ToolResult { tool_use_id: String, content: String, is_error: bool },
+    Text {
+        text: String,
+    },
+    ToolUse {
+        id: String,
+        name: String,
+        input: Value,
+    },
+    ToolResult {
+        tool_use_id: String,
+        content: String,
+        is_error: bool,
+    },
 }
 
 /// One message of the conversation.
@@ -30,7 +40,11 @@ pub struct ChatMessage {
 impl ChatMessage {
     /// A user text message.
     pub fn user(text: impl Into<String>) -> Self {
-        ChatMessage { role: ChatRole::User, blocks: vec![Block::Text { text: text.into() }], raw: None }
+        ChatMessage {
+            role: ChatRole::User,
+            blocks: vec![Block::Text { text: text.into() }],
+            raw: None,
+        }
     }
 
     /// Concatenated text blocks.
@@ -121,5 +135,9 @@ pub trait Provider: Send + Sync {
     /// Human-readable name (`"anthropic:<model>"`, `"ollama:<model>"`).
     fn name(&self) -> String;
     /// Run one streamed turn.
-    async fn turn(&self, req: TurnRequest<'_>, on_event: &(dyn Fn(StreamEvent) + Send + Sync)) -> crate::Result<TurnResponse>;
+    async fn turn(
+        &self,
+        req: TurnRequest<'_>,
+        on_event: &(dyn Fn(StreamEvent) + Send + Sync),
+    ) -> crate::Result<TurnResponse>;
 }

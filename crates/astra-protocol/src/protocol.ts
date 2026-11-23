@@ -320,11 +320,7 @@ export interface Snapshot {
   cursor: number
 }
 
-export type NodeEvent =
-  | { type: 'ops'; ops: Op[]; cursor: number }
-  | { type: 'presence'; presence: Presence[] }
-  | { type: 'connectivity'; online: boolean; relay: RelayStatus }
-
+/** Payload of the `astra://connectivity` event. `astra://ops` carries `{ops, cursor}`; `astra://presence` carries `Presence[]`. */
 export interface Connectivity {
   online: boolean
   relay: RelayStatus

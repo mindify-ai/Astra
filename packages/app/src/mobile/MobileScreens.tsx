@@ -239,7 +239,7 @@ export function MobileReview({ missionId }: { missionId: string }) {
   const ma = current ? s.missionAgents[current.missionAgentId] : undefined
   const ios = mobileVariant === 'ios'
   const options = results.map((r) => ({ value: r.id, label: `Result ${r.label}` }))
-  const allowed = canApprove(s, s.me, missionId) && mission.status !== 'merged'
+  const allowed = canApprove(s, s.me, missionId, current?.missionAgentId) && mission.status !== 'merged'
   const doMerge = async () => {
     if (!current) return
     await merge(client, current.id)

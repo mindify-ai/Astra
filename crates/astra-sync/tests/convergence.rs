@@ -28,7 +28,9 @@ impl SimClient {
         store.set_identity(WS, &format!("p{i}")).expect("identity");
         let store = Arc::new(Mutex::new(store));
         SimClient {
-            host: StoreHost { store: store.clone() },
+            host: StoreHost {
+                store: store.clone(),
+            },
             store,
             clock: HlcClock::new(format!("n{i}")),
             core: ClientCore::new(WS, format!("n{i}"), None),
@@ -47,13 +49,33 @@ impl SimClient {
 
 #[derive(Debug, Clone)]
 enum Action {
-    Put { client: usize, person: u8, name: u8 },
-    Patch { client: usize, person: u8, name: u8, initials: bool },
-    Delete { client: usize, person: u8 },
-    ToHub { client: usize },
-    ToClient { client: usize },
-    Disconnect { client: usize },
-    Connect { client: usize },
+    Put {
+        client: usize,
+        person: u8,
+        name: u8,
+    },
+    Patch {
+        client: usize,
+        person: u8,
+        name: u8,
+        initials: bool,
+    },
+    Delete {
+        client: usize,
+        person: u8,
+    },
+    ToHub {
+        client: usize,
+    },
+    ToClient {
+        client: usize,
+    },
+    Disconnect {
+        client: usize,
+    },
+    Connect {
+        client: usize,
+    },
 }
 
 fn action(n: usize) -> impl Strategy<Value = Action> {
@@ -72,19 +94,36 @@ fn action(n: usize) -> impl Strategy<Value = Action> {
 
 fn local(c: &mut SimClient, body: OpBody) {
     let op = Op::new(c.clock.tick(), c.clock.node().to_string(), body);
-    c.store.lock().expect("lock").append(&[op], Origin::Local).expect("append");
+    c.store
+        .lock()
+        .expect("lock")
+        .append(&[op], Origin::Local)
+        .expect("append");
     let frames = c.core.on_local_change(&c.host).expect("local change");
     c.outbox.extend(frames);
 }
 
 async fn step(hub: &Hub, clients: &mut [SimClient], a: &Action) {
     match *a {
-        Action::Put { client, person, name } => {
+        Action::Put {
+            client,
+            person,
+            name,
+        } => {
             let c = &mut clients[client];
-            let p = Person { id: format!("p-{person}"), name: format!("name-{name}"), initials: "X".into() };
+            let p = Person {
+                id: format!("p-{person}"),
+                name: format!("name-{name}"),
+                initials: "X".into(),
+            };
             local(c, OpBody::put(p));
         }
-        Action::Patch { client, person, name, initials } => {
+        Action::Patch {
+            client,
+            person,
+            name,
+            initials,
+        } => {
             let c = &mut clients[client];
             let id = format!("p-{person}");
             // Clients only patch entities they know (patches are causally after the put).
@@ -92,11 +131,20 @@ async fn step(hub: &Hub, clients: &mut [SimClient], a: &Action) {
                 return;
             }
             let field = if initials { "initials" } else { "name" };
-            local(c, OpBody::patch(EntityKind::Person, id, [(field, format!("v{name}").into())]));
+            local(
+                c,
+                OpBody::patch(EntityKind::Person, id, [(field, format!("v{name}").into())]),
+            );
         }
         Action::Delete { client, person } => {
             let c = &mut clients[client];
-            local(c, OpBody::Delete { entity_kind: EntityKind::Person, id: format!("p-{person}") });
+            local(
+                c,
+                OpBody::Delete {
+                    entity_kind: EntityKind::Person,
+                    id: format!("p-{person}"),
+                },
+            );
         }
         Action::ToHub { client } => {
             let c = &mut clients[client];
@@ -114,7 +162,10 @@ async fn step(hub: &Hub, clients: &mut [SimClient], a: &Action) {
                         c.clock.observe(&op.hlc);
                     }
                 }
-                let out = c.core.on_frame(&c.host, frame).expect("client handles frame");
+                let out = c
+                    .core
+                    .on_frame(&c.host, frame)
+                    .expect("client handles frame");
                 c.outbox.extend(out);
             }
         }
@@ -150,7 +201,10 @@ async fn quiesce(hub: &Hub, clients: &mut [SimClient]) {
                 progressed = true;
             }
             loop {
-                let has = clients[i].conn.as_mut().is_some_and(|(_, rx)| !rx.is_empty());
+                let has = clients[i]
+                    .conn
+                    .as_mut()
+                    .is_some_and(|(_, rx)| !rx.is_empty());
                 if !has {
                     break;
                 }
@@ -166,7 +220,10 @@ async fn quiesce(hub: &Hub, clients: &mut [SimClient]) {
 }
 
 fn run_case(n: usize, actions: Vec<Action>) {
-    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().expect("rt");
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("rt");
     rt.block_on(async move {
         let log = Arc::new(MemoryOpLog::new());
         let hub = Hub::new(log.clone(), Arc::new(AllowAll));
@@ -179,12 +236,17 @@ fn run_case(n: usize, actions: Vec<Action>) {
         let reference = clients[0].state();
         for (i, c) in clients.iter().enumerate() {
             assert_eq!(c.state(), reference, "client {i} diverged");
-            assert!(c.store.lock().expect("lock").pending_outbound().expect("pending").is_empty());
-            assert_eq!(
-                c.store.lock().expect("lock").cursor().expect("cursor"),
-                log.head(WS).await.expect("head"),
-                "client {i} cursor"
+            assert!(
+                c.store
+                    .lock()
+                    .expect("lock")
+                    .pending_outbound()
+                    .expect("pending")
+                    .is_empty()
             );
+            let head = log.head(WS).await.expect("head");
+            let cursor = c.store.lock().expect("lock").cursor().expect("cursor");
+            assert_eq!(cursor, head, "client {i} cursor");
         }
         // The server log, reduced in server order, gives the same state.
         let all = log.since(WS, 0, usize::MAX).await.expect("since");

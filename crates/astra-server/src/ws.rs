@@ -33,7 +33,12 @@ fn encode(format: Format, frame: &ServerFrame) -> Option<Message> {
 }
 
 async fn close(socket: &mut WebSocket, code: u16, reason: &str) {
-    let _ = socket.send(Message::Close(Some(CloseFrame { code, reason: reason.to_string().into() }))).await;
+    let _ = socket
+        .send(Message::Close(Some(CloseFrame {
+            code,
+            reason: reason.to_string().into(),
+        })))
+        .await;
 }
 
 async fn serve_socket(mut socket: WebSocket, state: AppState, format: Format) {

@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use astra_protocol::{ClientFrame, Op, Presence, ServerFrame};
+use astra_protocol::{ClientFrame, Op, OpBody, Presence, ServerFrame};
 use futures::{Sink, SinkExt, Stream, StreamExt};
 use tokio::sync::mpsc;
 
@@ -51,11 +51,16 @@ impl MemoryOpLog {
 
     /// Nodes that have connected, with how many times.
     pub fn nodes(&self) -> Vec<(String, String)> {
-        self.nodes.lock().map(|n| n.keys().cloned().collect()).unwrap_or_default()
+        self.nodes
+            .lock()
+            .map(|n| n.keys().cloned().collect())
+            .unwrap_or_default()
     }
 
     fn lock(&self) -> Result<std::sync::MutexGuard<'_, HashMap<String, MemWorkspace>>> {
-        self.inner.lock().map_err(|_| SyncError::Storage("lock poisoned".into()))
+        self.inner
+            .lock()
+            .map_err(|_| SyncError::Storage("lock poisoned".into()))
     }
 }
 
@@ -79,17 +84,29 @@ impl OpLog for MemoryOpLog {
         let all = self.lock()?;
         Ok(all
             .get(workspace)
-            .map(|ws| ws.ops.iter().filter(|(s, _)| *s > cursor).take(limit).cloned().collect())
+            .map(|ws| {
+                ws.ops
+                    .iter()
+                    .filter(|(s, _)| *s > cursor)
+                    .take(limit)
+                    .cloned()
+                    .collect()
+            })
             .unwrap_or_default())
     }
 
     async fn head(&self, workspace: &str) -> Result<u64> {
-        Ok(self.lock()?.get(workspace).map(|ws| ws.ops.len() as u64).unwrap_or(0))
+        Ok(self
+            .lock()?
+            .get(workspace)
+            .map(|ws| ws.ops.len() as u64)
+            .unwrap_or(0))
     }
 
     async fn node_seen(&self, workspace: &str, node: &str) -> Result<()> {
         if let Ok(mut n) = self.nodes.lock() {
-            *n.entry((workspace.to_string(), node.to_string())).or_default() += 1;
+            *n.entry((workspace.to_string(), node.to_string()))
+                .or_default() += 1;
         }
         Ok(())
     }
@@ -100,12 +117,21 @@ impl OpLog for MemoryOpLog {
 pub struct Principal {
     /// Person id or node id.
     pub subject: String,
+    /// The signed-in person, when the hello was authenticated as one. Pushed ops are then held to it:
+    /// commands must be authored by this person (runner nodes authorize approve/merge/steer by `actor`),
+    /// and other ops by this person or the connection's own node; presence is rewritten to this person.
+    pub person: Option<String>,
 }
 
 /// Decides whether a `hello` may join its workspace.
 #[async_trait::async_trait]
 pub trait Authorizer: Send + Sync {
-    async fn authorize(&self, workspace_id: &str, node_id: &str, token: Option<&str>) -> Result<Principal>;
+    async fn authorize(
+        &self,
+        workspace_id: &str,
+        node_id: &str,
+        token: Option<&str>,
+    ) -> Result<Principal>;
 }
 
 /// Accepts every hello (tests, trusted in-process use).
@@ -113,8 +139,16 @@ pub struct AllowAll;
 
 #[async_trait::async_trait]
 impl Authorizer for AllowAll {
-    async fn authorize(&self, _workspace_id: &str, node_id: &str, _token: Option<&str>) -> Result<Principal> {
-        Ok(Principal { subject: node_id.to_string() })
+    async fn authorize(
+        &self,
+        _workspace_id: &str,
+        node_id: &str,
+        _token: Option<&str>,
+    ) -> Result<Principal> {
+        Ok(Principal {
+            subject: node_id.to_string(),
+            person: None,
+        })
     }
 }
 
@@ -147,7 +181,12 @@ pub struct Hub {
 impl Hub {
     /// A hub over `log` authorizing with `auth`.
     pub fn new(log: Arc<dyn OpLog>, auth: Arc<dyn Authorizer>) -> Arc<Hub> {
-        Arc::new(Hub { log, auth, inner: Mutex::new(Inner::default()), next: AtomicU64::new(1) })
+        Arc::new(Hub {
+            log,
+            auth,
+            inner: Mutex::new(Inner::default()),
+            next: AtomicU64::new(1),
+        })
     }
 
     /// Append ops made by the server itself (e.g. a person entity on first sign-in) and fan them out.
@@ -161,7 +200,10 @@ impl Hub {
 
     fn fan_out(&self, ws: &str, stored: &[(u64, Op)]) -> Result<()> {
         if let Some((cursor, _)) = stored.last() {
-            let frame = ServerFrame::Ops { ops: stored.iter().map(|(_, op)| op.clone()).collect(), cursor: *cursor };
+            let frame = ServerFrame::Ops {
+                ops: stored.iter().map(|(_, op)| op.clone()).collect(),
+                cursor: *cursor,
+            };
             let inner = self.lock()?;
             for c in inner.conns.values() {
                 if c.live && c.workspace.as_deref() == Some(ws) {
@@ -178,7 +220,9 @@ impl Hub {
     }
 
     fn lock(&self) -> Result<std::sync::MutexGuard<'_, Inner>> {
-        self.inner.lock().map_err(|_| SyncError::Storage("hub lock poisoned".into()))
+        self.inner
+            .lock()
+            .map_err(|_| SyncError::Storage("hub lock poisoned".into()))
     }
 
     /// Register a connection. Frames for it arrive on the returned receiver.
@@ -188,7 +232,14 @@ impl Hub {
         if let Ok(mut inner) = self.lock() {
             inner.conns.insert(
                 id,
-                Conn { tx, workspace: None, node: None, principal: None, live: false, presence: vec![] },
+                Conn {
+                    tx,
+                    workspace: None,
+                    node: None,
+                    principal: None,
+                    live: false,
+                    presence: vec![],
+                },
             );
         }
         (id, rx)
@@ -196,11 +247,18 @@ impl Hub {
 
     /// Unregister a connection (relays the presence change).
     pub fn disconnect(&self, conn: ConnId) {
-        let removed = self.lock().ok().and_then(|mut inner| inner.conns.remove(&conn));
-        if let Some(Conn { workspace: Some(ws), presence, .. }) = removed {
-            if !presence.is_empty() {
-                self.broadcast_presence(&ws);
-            }
+        let removed = self
+            .lock()
+            .ok()
+            .and_then(|mut inner| inner.conns.remove(&conn));
+        if let Some(Conn {
+            workspace: Some(ws),
+            presence,
+            ..
+        }) = removed
+            && !presence.is_empty()
+        {
+            self.broadcast_presence(&ws);
         }
     }
 
@@ -220,18 +278,25 @@ impl Hub {
 
     /// The authenticated principal of a connection.
     pub fn principal(&self, conn: ConnId) -> Option<Principal> {
-        self.lock().ok().and_then(|inner| inner.conns.get(&conn).and_then(|c| c.principal.clone()))
+        self.lock()
+            .ok()
+            .and_then(|inner| inner.conns.get(&conn).and_then(|c| c.principal.clone()))
     }
 
     fn workspace_lock(&self, ws: &str) -> Result<Arc<tokio::sync::Mutex<()>>> {
-        Ok(self.lock()?.workspace_locks.entry(ws.to_string()).or_default().clone())
+        Ok(self
+            .lock()?
+            .workspace_locks
+            .entry(ws.to_string())
+            .or_default()
+            .clone())
     }
 
     fn send(&self, conn: ConnId, frame: ServerFrame) {
-        if let Ok(inner) = self.lock() {
-            if let Some(c) = inner.conns.get(&conn) {
-                let _ = c.tx.send(frame);
-            }
+        if let Ok(inner) = self.lock()
+            && let Some(c) = inner.conns.get(&conn)
+        {
+            let _ = c.tx.send(frame);
         }
     }
 
@@ -244,22 +309,68 @@ impl Hub {
         }
     }
 
+    /// Rejects ops whose `actor` the connection may not claim (see [`Principal::person`]).
+    fn check_actors(&self, conn: ConnId, ops: &[Op]) -> Result<()> {
+        let (person, node) = {
+            let inner = self.lock()?;
+            let c = inner.conns.get(&conn).ok_or(SyncError::Closed)?;
+            (
+                c.principal.as_ref().and_then(|p| p.person.clone()),
+                c.node.clone(),
+            )
+        };
+        let Some(person) = person else {
+            return Ok(());
+        };
+        for op in ops {
+            let allowed = match op.body {
+                OpBody::Command { .. } => op.actor == person,
+                _ => op.actor == person || node.as_deref() == Some(op.actor.as_str()),
+            };
+            if !allowed {
+                return Err(SyncError::Protocol(format!(
+                    "op {} claims actor {} but the connection is {}",
+                    op.id, op.actor, person
+                )));
+            }
+        }
+        Ok(())
+    }
+
     /// Process one client frame. On error an `error` frame has been queued and the caller should close.
     pub async fn handle(&self, conn: ConnId, frame: ClientFrame) -> Result<()> {
         let r = self.handle_inner(conn, frame).await;
         if let Err(e) = &r {
-            self.send(conn, ServerFrame::Error { message: e.to_string() });
+            self.send(
+                conn,
+                ServerFrame::Error {
+                    message: e.to_string(),
+                },
+            );
         }
         r
     }
 
     async fn handle_inner(&self, conn: ConnId, frame: ClientFrame) -> Result<()> {
         match frame {
-            ClientFrame::Hello { workspace_id, node_id, cursor, token } => {
-                if self.lock()?.conns.get(&conn).is_some_and(|c| c.workspace.is_some()) {
+            ClientFrame::Hello {
+                workspace_id,
+                node_id,
+                cursor,
+                token,
+            } => {
+                if self
+                    .lock()?
+                    .conns
+                    .get(&conn)
+                    .is_some_and(|c| c.workspace.is_some())
+                {
                     return Err(SyncError::Protocol("duplicate hello".into()));
                 }
-                let principal = self.auth.authorize(&workspace_id, &node_id, token.as_deref()).await?;
+                let principal = self
+                    .auth
+                    .authorize(&workspace_id, &node_id, token.as_deref())
+                    .await?;
                 let lock = self.workspace_lock(&workspace_id)?;
                 let _guard = lock.lock().await;
                 {
@@ -277,7 +388,13 @@ impl Hub {
                     let Some((last, _)) = page.last() else { break };
                     from = *last;
                     let n = page.len();
-                    self.send(conn, ServerFrame::Ops { ops: page.into_iter().map(|(_, op)| op).collect(), cursor: from });
+                    self.send(
+                        conn,
+                        ServerFrame::Ops {
+                            ops: page.into_iter().map(|(_, op)| op).collect(),
+                            cursor: from,
+                        },
+                    );
                     if n < REPLAY_PAGE {
                         break;
                     }
@@ -300,6 +417,7 @@ impl Hub {
                 if !live {
                     return Err(SyncError::Protocol("push before welcome".into()));
                 }
+                self.check_actors(conn, &ops)?;
                 let lock = self.workspace_lock(&ws)?;
                 let _guard = lock.lock().await;
                 let ids: Vec<String> = ops.iter().map(|o| o.id.clone()).collect();
@@ -308,8 +426,13 @@ impl Hub {
                 self.send(conn, ServerFrame::Ack { ids });
                 Ok(())
             }
-            ClientFrame::Presence { presence } => {
+            ClientFrame::Presence { mut presence } => {
                 let (ws, _) = self.conn_workspace(conn)?;
+                if let Some(person) = self.principal(conn).and_then(|p| p.person) {
+                    for p in &mut presence {
+                        p.person_id.clone_from(&person);
+                    }
+                }
                 {
                     let mut inner = self.lock()?;
                     if let Some(c) = inner.conns.get_mut(&conn) {
@@ -341,7 +464,9 @@ impl Hub {
         if let Ok(inner) = self.lock() {
             for c in inner.conns.values() {
                 if c.live && c.workspace.as_deref() == Some(ws) {
-                    let _ = c.tx.send(ServerFrame::Presence { presence: presence.clone() });
+                    let _ = c.tx.send(ServerFrame::Presence {
+                        presence: presence.clone(),
+                    });
                 }
             }
         }

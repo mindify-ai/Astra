@@ -16,7 +16,9 @@ pub struct TestHost {
 
 impl TestHost {
     pub fn new(state: State) -> Arc<TestHost> {
-        Arc::new(TestHost { inner: Mutex::new((Reducer::new(state), HlcClock::new(NODE), vec![])) })
+        Arc::new(TestHost {
+            inner: Mutex::new((Reducer::new(state), HlcClock::new(NODE), vec![])),
+        })
     }
 
     pub fn state(&self) -> State {
@@ -38,7 +40,13 @@ impl TestHost {
     }
 
     pub fn command(&self, orch: &Orchestrator, actor: &str, command: Command) -> Op {
-        let op = self.client_op(actor, OpBody::Command { node: NODE.into(), command });
+        let op = self.client_op(
+            actor,
+            OpBody::Command {
+                node: NODE.into(),
+                command,
+            },
+        );
         orch.submit(&op);
         op
     }
@@ -69,16 +77,17 @@ impl NodeHost for TestHost {
         Ok(out)
     }
     fn has_command_result(&self, command_op: &str) -> bool {
-        self.inner
-            .lock()
-            .expect("lock")
-            .2
-            .iter()
-            .any(|o| matches!(&o.body, OpBody::CommandResult { command_op: c, .. } if c == command_op))
+        self.inner.lock().expect("lock").2.iter().any(
+            |o| matches!(&o.body, OpBody::CommandResult { command_op: c, .. } if c == command_op),
+        )
     }
 }
 
-pub async fn wait_for<T>(host: &TestHost, what: &str, mut f: impl FnMut(&State, &[Op]) -> Option<T>) -> T {
+pub async fn wait_for<T>(
+    host: &TestHost,
+    what: &str,
+    mut f: impl FnMut(&State, &[Op]) -> Option<T>,
+) -> T {
     for _ in 0..600 {
         {
             let g = host.inner.lock().expect("lock");
@@ -93,11 +102,18 @@ pub async fn wait_for<T>(host: &TestHost, what: &str, mut f: impl FnMut(&State, 
 }
 
 pub fn orchestrator(host: Arc<TestHost>, data_dir: &Path) -> Orchestrator {
-    Orchestrator::start(host, OrchestratorConfig::new(data_dir, Arc::new(MemorySecrets::new())))
+    Orchestrator::start(
+        host,
+        OrchestratorConfig::new(data_dir, Arc::new(MemorySecrets::new())),
+    )
 }
 
 pub fn person(id: &str) -> Entity {
-    Entity::Person(Person { id: id.into(), name: id.into(), initials: "XX".into() })
+    Entity::Person(Person {
+        id: id.into(),
+        name: id.into(),
+        initials: "XX".into(),
+    })
 }
 
 pub fn repo(path: &Path) -> Entity {
@@ -176,7 +192,11 @@ pub fn membership(mission: &str, person: &str, access: Access) -> Entity {
 /// The commandResult of `op` among `ops`.
 pub fn result_in(ops: &[Op], op: &Op) -> Option<(bool, Option<String>)> {
     ops.iter().find_map(|o| match &o.body {
-        OpBody::CommandResult { command_op, ok, error } if *command_op == op.id => Some((*ok, error.clone())),
+        OpBody::CommandResult {
+            command_op,
+            ok,
+            error,
+        } if *command_op == op.id => Some((*ok, error.clone())),
         _ => None,
     })
 }

@@ -10,7 +10,11 @@ use clap::{ArgAction, Parser};
 use tracing_subscriber::EnvFilter;
 
 #[derive(Parser, Debug)]
-#[command(name = "astra-server", version, about = "Astra sync relay and identity server")]
+#[command(
+    name = "astra-server",
+    version,
+    about = "Astra sync relay and identity server"
+)]
 struct Cli {
     /// Full bind address (overrides PORT).
     #[arg(long, env = "ASTRA_BIND")]
@@ -26,15 +30,24 @@ struct Cli {
     #[arg(long, env = "ASTRA_JWT_SECRET", hide_env_values = true)]
     jwt_secret: Option<String>,
     /// Enable `POST /v1/auth/dev-token` and permissive CORS.
-    #[arg(long, env = "ASTRA_DEV_AUTH", action = ArgAction::SetTrue)]
+    /// Accepts `1`/`0`, `true`/`false`, `yes`/`no`, `on`/`off` from the environment.
+    #[arg(long, env = "ASTRA_DEV_AUTH", action = ArgAction::SetTrue, value_parser = clap::builder::BoolishValueParser::new())]
     dev_auth: bool,
     #[arg(long, env = "GITHUB_CLIENT_ID")]
     github_client_id: Option<String>,
     #[arg(long, env = "GITLAB_CLIENT_ID")]
     gitlab_client_id: Option<String>,
-    #[arg(long, env = "ASTRA_GITHUB_OAUTH_BASE", default_value = "https://github.com")]
+    #[arg(
+        long,
+        env = "ASTRA_GITHUB_OAUTH_BASE",
+        default_value = "https://github.com"
+    )]
     github_oauth_base: String,
-    #[arg(long, env = "ASTRA_GITHUB_API_BASE", default_value = "https://api.github.com")]
+    #[arg(
+        long,
+        env = "ASTRA_GITHUB_API_BASE",
+        default_value = "https://api.github.com"
+    )]
     github_api_base: String,
     #[arg(long, env = "ASTRA_GITLAB_BASE", default_value = "https://gitlab.com")]
     gitlab_base: String,
@@ -51,15 +64,22 @@ struct Cli {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info,tower_http=info"));
+    let filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new("info,tower_http=info"));
     if cli.log_format.as_deref() == Some("json") {
-        tracing_subscriber::fmt().json().with_env_filter(filter).with_current_span(false).init();
+        tracing_subscriber::fmt()
+            .json()
+            .with_env_filter(filter)
+            .with_current_span(false)
+            .init();
     } else {
         tracing_subscriber::fmt().with_env_filter(filter).init();
     }
 
     let config = ServerConfig {
-        bind: cli.bind.unwrap_or_else(|| SocketAddr::from(([0, 0, 0, 0], cli.port))),
+        bind: cli
+            .bind
+            .unwrap_or_else(|| SocketAddr::from(([0, 0, 0, 0], cli.port))),
         database_url: cli.database_url,
         db_max_connections: cli.db_max_connections,
         jwt_secret: cli.jwt_secret,
@@ -71,16 +91,23 @@ async fn main() -> anyhow::Result<()> {
             github_api_base: cli.github_api_base.trim_end_matches('/').into(),
             gitlab_base: cli.gitlab_base.trim_end_matches('/').into(),
         },
-        allowed_origins: cli
-            .allowed_origins
-            .map(|s| s.split(',').map(|o| o.trim().to_string()).filter(|o| !o.is_empty()).collect()),
+        allowed_origins: cli.allowed_origins.map(|s| {
+            s.split(',')
+                .map(|o| o.trim().to_string())
+                .filter(|o| !o.is_empty())
+                .collect()
+        }),
         rate_limit_per_min: cli.rate_limit_per_min,
         ..ServerConfig::default()
     };
     let bind = config.bind;
     let (tx, rx) = tokio::sync::watch::channel(false);
-    let state = astra_server::build_state(config, rx.clone()).await.context("startup failed")?;
-    let listener = tokio::net::TcpListener::bind(bind).await.with_context(|| format!("bind {bind}"))?;
+    let state = astra_server::build_state(config, rx.clone())
+        .await
+        .context("startup failed")?;
+    let listener = tokio::net::TcpListener::bind(bind)
+        .await
+        .with_context(|| format!("bind {bind}"))?;
     tracing::info!(%bind, "astra-server listening");
 
     tokio::spawn(async move {

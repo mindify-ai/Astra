@@ -93,32 +93,48 @@ pub struct AppState {
 }
 
 /// Build the state: connect + migrate Postgres (or fall back to memory), set up auth.
-pub async fn build_state(config: ServerConfig, shutdown: watch::Receiver<bool>) -> Result<AppState, StartupError> {
+pub async fn build_state(
+    config: ServerConfig,
+    shutdown: watch::Receiver<bool>,
+) -> Result<AppState, StartupError> {
     let secret = match (&config.jwt_secret, config.dev_auth) {
         (Some(s), _) if !s.is_empty() => s.clone(),
         (_, true) => {
-            tracing::warn!("ASTRA_DEV_AUTH=1 without ASTRA_JWT_SECRET: using the development secret");
+            tracing::warn!(
+                "ASTRA_DEV_AUTH=1 without ASTRA_JWT_SECRET: using the development secret"
+            );
             DEV_JWT_SECRET.to_string()
         }
         _ => return Err(StartupError::MissingJwtSecret),
     };
     let jwt = Jwt::new(secret.as_bytes())?;
-    let (log, db, directory): (Arc<dyn OpLog>, Option<sqlx::PgPool>, Directory) = match &config.database_url {
-        Some(url) if !url.is_empty() => {
-            let pool = sqlx::postgres::PgPoolOptions::new()
-                .max_connections(config.db_max_connections)
-                .acquire_timeout(Duration::from_secs(10))
-                .connect(url)
-                .await?;
-            pg::migrate(&pool).await?;
-            tracing::info!("using Postgres");
-            (Arc::new(pg::PgOpLog::new(pool.clone())), Some(pool.clone()), Directory::Postgres(pool))
-        }
-        _ => {
-            tracing::warn!("DATABASE_URL is not set: using the in-memory backend (data is lost on restart)");
-            (Arc::new(MemoryOpLog::new()), None, Directory::Memory(Mutex::new(Default::default())))
-        }
-    };
+    let (log, db, directory): (Arc<dyn OpLog>, Option<sqlx::PgPool>, Directory) =
+        match &config.database_url {
+            Some(url) if !url.is_empty() => {
+                let pool = sqlx::postgres::PgPoolOptions::new()
+                    .max_connections(config.db_max_connections)
+                    .acquire_timeout(Duration::from_secs(10))
+                    .connect(url)
+                    .await?;
+                pg::migrate(&pool).await?;
+                tracing::info!("using Postgres");
+                (
+                    Arc::new(pg::PgOpLog::new(pool.clone())),
+                    Some(pool.clone()),
+                    Directory::Postgres(pool),
+                )
+            }
+            _ => {
+                tracing::warn!(
+                    "DATABASE_URL is not set: using the in-memory backend (data is lost on restart)"
+                );
+                (
+                    Arc::new(MemoryOpLog::new()),
+                    None,
+                    Directory::Memory(Mutex::new(Default::default())),
+                )
+            }
+        };
     let hub = Hub::new(log, Arc::new(JwtAuthorizer { jwt: jwt.clone() }));
     let http = reqwest::Client::builder()
         .timeout(Duration::from_secs(15))
@@ -161,7 +177,10 @@ fn cors(config: &ServerConfig) -> CorsLayer {
         .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE]);
     match &config.allowed_origins {
         Some(list) => {
-            let origins: Vec<HeaderValue> = list.iter().filter_map(|o| HeaderValue::from_str(o.trim()).ok()).collect();
+            let origins: Vec<HeaderValue> = list
+                .iter()
+                .filter_map(|o| HeaderValue::from_str(o.trim()).ok())
+                .collect();
             base.allow_origin(AllowOrigin::list(origins))
         }
         None if config.dev_auth => base.allow_origin(AllowOrigin::any()),
@@ -177,7 +196,10 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/auth/device/start", post(auth::device_start))
         .route("/v1/auth/device/poll", post(auth::device_poll))
         .route("/v1/me", get(auth::me))
-        .layer(axum::middleware::from_fn_with_state(state.clone(), ratelimit::middleware));
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            ratelimit::middleware,
+        ));
     Router::new()
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz))
@@ -188,7 +210,11 @@ pub fn router(state: AppState) -> Router {
 }
 
 /// Serve on `listener` until `shutdown` flips to true; open WebSockets get a normal close frame.
-pub async fn serve(listener: tokio::net::TcpListener, state: AppState, mut shutdown: watch::Receiver<bool>) -> std::io::Result<()> {
+pub async fn serve(
+    listener: tokio::net::TcpListener,
+    state: AppState,
+    mut shutdown: watch::Receiver<bool>,
+) -> std::io::Result<()> {
     let app = router(state).into_make_service_with_connect_info::<SocketAddr>();
     axum::serve(listener, app)
         .with_graceful_shutdown(async move {

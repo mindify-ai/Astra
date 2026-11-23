@@ -13,8 +13,15 @@ describe('mock node', () => {
     const s = c.getState()
     expect(s.approvals['ap-0042']).toMatchObject({ state: 'approved', decidedBy: 'p-mark' })
     expect(s.missionAgents['ma-014-tester']?.status).toBe('working')
-    expect(s.tasks['t-014-migrate']?.column).toBe('done')
-    expect(s.tasks['t-014-integration']?.column).toBe('working')
+    expect(s.tasks['t-014-migrate']?.column).toBe('working')
+  })
+
+  it('denying closes the linked task with a note', async () => {
+    const c = client()
+    await approve(c, 'ap-0042', false)
+    const s = c.getState()
+    expect(s.approvals['ap-0042']?.state).toBe('denied')
+    expect(s.tasks['t-014-migrate']).toMatchObject({ column: 'done', note: 'Denied by p-mark' })
   })
 
   it('rejects steering a builder held by someone else', async () => {
@@ -25,6 +32,27 @@ describe('mock node', () => {
     expect(Object.keys(c.getState().messages).length).toBe(before + 1)
     expect(c.getState().missionAgents['ma-014-builder']?.steeredBy).toBe('p-lin')
     expect(ops[0]?.body.type).toBe('put')
+  })
+
+  it('lets steerers approve only when the agent or mission allows it', async () => {
+    const c = client()
+    const lin = (bodyType: 'approve') => [
+      {
+        id: `x-${bodyType}`,
+        hlc: '9999999999999999:000000:n',
+        actor: 'p-lin',
+        body: {
+          type: 'command' as const,
+          node: 'n-mark-desktop',
+          command: { type: bodyType, approvalId: 'ap-0042' },
+        },
+      },
+    ]
+    // Lin can steer, but mission 014 lets only its owner approve.
+    ;(c as unknown as { receive: (ops: unknown[]) => void; send: (ops: unknown[]) => Promise<void> }).send(
+      lin('approve'),
+    )
+    expect(c.getState().approvals['ap-0042']?.state).toBe('pending')
   })
 
   it('merges a race result and keeps the other branch', async () => {

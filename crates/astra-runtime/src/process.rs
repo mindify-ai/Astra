@@ -18,7 +18,10 @@ pub struct LogRing {
 impl LogRing {
     /// A ring holding at most `cap` lines.
     pub fn new(cap: usize) -> Self {
-        LogRing { inner: Arc::new(Mutex::new(VecDeque::with_capacity(cap.min(1024)))), cap }
+        LogRing {
+            inner: Arc::new(Mutex::new(VecDeque::with_capacity(cap.min(1024)))),
+            cap,
+        }
     }
 
     /// Append a line.
@@ -33,12 +36,19 @@ impl LogRing {
 
     /// Current lines, oldest first.
     pub fn lines(&self) -> Vec<String> {
-        self.inner.lock().map(|q| q.iter().cloned().collect()).unwrap_or_default()
+        self.inner
+            .lock()
+            .map(|q| q.iter().cloned().collect())
+            .unwrap_or_default()
     }
 }
 
 /// Copy lines from a reader into a ring (with a prefix).
-pub fn pump_lines<R: AsyncRead + Unpin + Send + 'static>(reader: R, ring: LogRing, prefix: &'static str) {
+pub fn pump_lines<R: AsyncRead + Unpin + Send + 'static>(
+    reader: R,
+    ring: LogRing,
+    prefix: &'static str,
+) {
     tokio::spawn(async move {
         let mut lines = BufReader::new(reader).lines();
         while let Ok(Some(line)) = lines.next_line().await {
@@ -92,7 +102,9 @@ impl Supervised {
     fn signal(&self, sig: Sig) {
         use nix::sys::signal::{Signal, killpg};
         use nix::unistd::Pid;
-        let Some(pgid) = self.pgid.and_then(|p| i32::try_from(p).ok()) else { return };
+        let Some(pgid) = self.pgid.and_then(|p| i32::try_from(p).ok()) else {
+            return;
+        };
         let s = match sig {
             Sig::Stop => Signal::SIGSTOP,
             Sig::Cont => Signal::SIGCONT,

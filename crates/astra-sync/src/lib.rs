@@ -12,7 +12,9 @@ pub mod client;
 pub mod codec;
 pub mod hub;
 
-pub use client::{ClientCore, Connector, StoreHost, SyncClient, SyncConfig, SyncHandle, SyncHost, Transport};
+pub use client::{
+    ClientCore, Connector, StoreHost, SyncClient, SyncConfig, SyncHandle, SyncHost, Transport,
+};
 pub use codec::Format;
 pub use hub::{AllowAll, Authorizer, ConnId, Hub, HubConnector, MemoryOpLog, OpLog, Principal};
 

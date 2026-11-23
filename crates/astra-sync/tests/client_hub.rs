@@ -5,7 +5,9 @@ use std::time::Duration;
 
 use astra_protocol::{Command, EntityKind, HlcClock, Op, OpBody, Person, Presence, State};
 use astra_store::{Origin, Store};
-use astra_sync::{AllowAll, Hub, HubConnector, MemoryOpLog, OpLog, StoreHost, SyncClient, SyncConfig, SyncHost};
+use astra_sync::{
+    AllowAll, Hub, HubConnector, MemoryOpLog, OpLog, StoreHost, SyncClient, SyncConfig, SyncHost,
+};
 
 struct Recording {
     inner: StoreHost,
@@ -53,8 +55,14 @@ async fn two_clients_sync_through_hub() {
     let connector = Arc::new(HubConnector { hub: hub.clone() });
 
     let (sa, sb) = (store(), store());
-    let ha = Arc::new(Recording { inner: StoreHost { store: sa.clone() }, presence: Mutex::new(vec![]) });
-    let hb = Arc::new(Recording { inner: StoreHost { store: sb.clone() }, presence: Mutex::new(vec![]) });
+    let ha = Arc::new(Recording {
+        inner: StoreHost { store: sa.clone() },
+        presence: Mutex::new(vec![]),
+    });
+    let hb = Arc::new(Recording {
+        inner: StoreHost { store: sb.clone() },
+        presence: Mutex::new(vec![]),
+    });
     let (ca, handle_a) = SyncClient::new(SyncConfig::new("ws", "n-a", None), ha.clone());
     let (cb, handle_b) = SyncClient::new(SyncConfig::new("ws", "n-b", None), hb.clone());
     tokio::spawn(ca.run(connector.clone()));
@@ -64,20 +72,52 @@ async fn two_clients_sync_through_hub() {
     let put = Op::new(
         clock.tick(),
         "p-a",
-        OpBody::put(Person { id: "p-1".into(), name: "One".into(), initials: "O".into() }),
+        OpBody::put(Person {
+            id: "p-1".into(),
+            name: "One".into(),
+            initials: "O".into(),
+        }),
     );
     let cmd = Op::new(
         clock.tick(),
         "p-a",
-        OpBody::Command { node: "n-b".into(), command: Command::TestAgent { agent_id: "a".into() } },
+        OpBody::Command {
+            node: "n-b".into(),
+            command: Command::TestAgent {
+                agent_id: "a".into(),
+            },
+        },
     );
-    sa.lock().expect("lock").append(&[put, cmd.clone()], Origin::Local).expect("append");
+    sa.lock()
+        .expect("lock")
+        .append(&[put, cmd.clone()], Origin::Local)
+        .expect("append");
     handle_a.notify_local();
 
-    eventually(|| sb.lock().expect("lock").state().contains(EntityKind::Person, "p-1")).await;
+    eventually(|| {
+        sb.lock()
+            .expect("lock")
+            .state()
+            .contains(EntityKind::Person, "p-1")
+    })
+    .await;
     // The command op is routed to node n-b.
-    eventually(|| sb.lock().expect("lock").unexecuted_commands("n-b").map(|c| c.len() == 1).unwrap_or(false)).await;
-    eventually(|| sa.lock().expect("lock").pending_outbound().map(|p| p.is_empty()).unwrap_or(false)).await;
+    eventually(|| {
+        sb.lock()
+            .expect("lock")
+            .unexecuted_commands("n-b")
+            .map(|c| c.len() == 1)
+            .unwrap_or(false)
+    })
+    .await;
+    eventually(|| {
+        sa.lock()
+            .expect("lock")
+            .pending_outbound()
+            .map(|p| p.is_empty())
+            .unwrap_or(false)
+    })
+    .await;
 
     handle_b.set_presence(vec![Presence {
         person_id: "p-b".into(),
@@ -85,15 +125,36 @@ async fn two_clients_sync_through_hub() {
         activity: "Looking".into(),
         at: "2026-01-01T00:00:00Z".into(),
     }]);
-    eventually(|| ha.presence.lock().expect("lock").iter().any(|p| p.len() == 1)).await;
+    eventually(|| {
+        ha.presence
+            .lock()
+            .expect("lock")
+            .iter()
+            .any(|p| p.len() == 1)
+    })
+    .await;
 
     // B goes away; A keeps writing; B comes back and catches up from its cursor.
     handle_b.shutdown();
     tokio::time::sleep(Duration::from_millis(50)).await;
-    let patch = Op::new(clock.tick(), "p-a", OpBody::patch(EntityKind::Person, "p-1", [("name", "Uno".into())]));
-    sa.lock().expect("lock").append(&[patch], Origin::Local).expect("append");
+    let patch = Op::new(
+        clock.tick(),
+        "p-a",
+        OpBody::patch(EntityKind::Person, "p-1", [("name", "Uno".into())]),
+    );
+    sa.lock()
+        .expect("lock")
+        .append(&[patch], Origin::Local)
+        .expect("append");
     handle_a.notify_local();
-    eventually(|| sa.lock().expect("lock").pending_outbound().map(|p| p.is_empty()).unwrap_or(false)).await;
+    eventually(|| {
+        sa.lock()
+            .expect("lock")
+            .pending_outbound()
+            .map(|p| p.is_empty())
+            .unwrap_or(false)
+    })
+    .await;
 
     let (cb2, _h) = SyncClient::new(SyncConfig::new("ws", "n-b", None), hb.clone());
     tokio::spawn(cb2.run(connector.clone()));
@@ -103,6 +164,7 @@ async fn two_clients_sync_through_hub() {
         a == b && b.people.get("p-1").is_some_and(|p| p.name == "Uno")
     })
     .await;
-    assert_eq!(sb.lock().expect("lock").cursor().expect("cursor"), log.head("ws").await.expect("head"));
+    let head = log.head("ws").await.expect("head");
+    assert_eq!(sb.lock().expect("lock").cursor().expect("cursor"), head);
     assert_eq!(log.head("ws").await.expect("head"), 3);
 }

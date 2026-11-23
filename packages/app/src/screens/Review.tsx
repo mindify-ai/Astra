@@ -55,7 +55,7 @@ function ResultCard({ result, merged }: { result: RaceResult; merged: boolean })
   const client = useClient()
   const navigate = useNavigate()
   const ma = s.missionAgents[result.missionAgentId]
-  const allowed = canApprove(s, s.me, result.missionId)
+  const allowed = canApprove(s, s.me, result.missionId, result.missionAgentId)
   const doMerge = async () => {
     await merge(client, result.id)
     void navigate({ to: '/missions/$missionId/merged', params: { missionId: result.missionId } })

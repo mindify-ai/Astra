@@ -11,11 +11,25 @@
           "actor": "p-mark",
           "body": {
             "type": "put",
-            "entity": { "kind": "person", "id": "p-x", "name": "Xu", "initials": "XU" }
+            "entity": {
+              "kind": "person",
+              "id": "p-x",
+              "name": "Xu",
+              "initials": "XU"
+            }
           }
         }
       ],
-      "expect": [{ "kind": "person", "id": "p-x", "fields": { "name": "Xu", "initials": "XU" } }]
+      "expect": [
+        {
+          "kind": "person",
+          "id": "p-x",
+          "fields": {
+            "name": "Xu",
+            "initials": "XU"
+          }
+        }
+      ]
     },
     {
       "name": "patch is last-writer-wins per field regardless of arrival order",
@@ -45,7 +59,9 @@
             "type": "patch",
             "entityKind": "missionAgent",
             "id": "ma-1",
-            "fields": { "status": "needsYou" }
+            "fields": {
+              "status": "needsYou"
+            }
           }
         },
         {
@@ -56,32 +72,71 @@
             "type": "patch",
             "entityKind": "missionAgent",
             "id": "ma-1",
-            "fields": { "status": "working", "steeredBy": "p-lin" }
+            "fields": {
+              "status": "working",
+              "steeredBy": "p-lin"
+            }
           }
         }
       ],
       "expect": [
-        { "kind": "missionAgent", "id": "ma-1", "fields": { "status": "needsYou", "steeredBy": "p-lin" } }
+        {
+          "kind": "missionAgent",
+          "id": "ma-1",
+          "fields": {
+            "status": "needsYou",
+            "steeredBy": "p-lin"
+          }
+        }
       ]
     },
     {
       "name": "hlc tie broken by node id inside the hlc string",
-      "initial": [{ "kind": "person", "id": "p-y", "name": "Y", "initials": "Y" }],
+      "initial": [
+        {
+          "kind": "person",
+          "id": "p-y",
+          "name": "Y",
+          "initials": "Y"
+        }
+      ],
       "ops": [
         {
           "id": "01J0000000000000000000000E",
           "hlc": "0001732180000500:000001:n2",
           "actor": "n2",
-          "body": { "type": "patch", "entityKind": "person", "id": "p-y", "fields": { "name": "From n2" } }
+          "body": {
+            "type": "patch",
+            "entityKind": "person",
+            "id": "p-y",
+            "fields": {
+              "name": "From n2"
+            }
+          }
         },
         {
           "id": "01J0000000000000000000000D",
           "hlc": "0001732180000500:000001:n1",
           "actor": "n1",
-          "body": { "type": "patch", "entityKind": "person", "id": "p-y", "fields": { "name": "From n1" } }
+          "body": {
+            "type": "patch",
+            "entityKind": "person",
+            "id": "p-y",
+            "fields": {
+              "name": "From n1"
+            }
+          }
         }
       ],
-      "expect": [{ "kind": "person", "id": "p-y", "fields": { "name": "From n2" } }]
+      "expect": [
+        {
+          "kind": "person",
+          "id": "p-y",
+          "fields": {
+            "name": "From n2"
+          }
+        }
+      ]
     },
     {
       "name": "older put does not overwrite newer patch",
@@ -93,14 +148,26 @@
           "actor": "n1",
           "body": {
             "type": "put",
-            "entity": { "kind": "person", "id": "p-z", "name": "Zed", "initials": "ZE" }
+            "entity": {
+              "kind": "person",
+              "id": "p-z",
+              "name": "Zed",
+              "initials": "ZE"
+            }
           }
         },
         {
           "id": "01J0000000000000000000000H",
           "hlc": "0001732180000300:000000:n1",
           "actor": "n1",
-          "body": { "type": "patch", "entityKind": "person", "id": "p-z", "fields": { "name": "Zara" } }
+          "body": {
+            "type": "patch",
+            "entityKind": "person",
+            "id": "p-z",
+            "fields": {
+              "name": "Zara"
+            }
+          }
         },
         {
           "id": "01J0000000000000000000000I",
@@ -108,15 +175,36 @@
           "actor": "n2",
           "body": {
             "type": "put",
-            "entity": { "kind": "person", "id": "p-z", "name": "Zoe", "initials": "ZO" }
+            "entity": {
+              "kind": "person",
+              "id": "p-z",
+              "name": "Zoe",
+              "initials": "ZO"
+            }
           }
         }
       ],
-      "expect": [{ "kind": "person", "id": "p-z", "fields": { "name": "Zara", "initials": "ZO" } }]
+      "expect": [
+        {
+          "kind": "person",
+          "id": "p-z",
+          "fields": {
+            "name": "Zara",
+            "initials": "ZO"
+          }
+        }
+      ]
     },
     {
       "name": "patch to unknown entity is ignored; delete tombstones",
-      "initial": [{ "kind": "person", "id": "p-d", "name": "D", "initials": "D" }],
+      "initial": [
+        {
+          "kind": "person",
+          "id": "p-d",
+          "name": "D",
+          "initials": "D"
+        }
+      ],
       "ops": [
         {
           "id": "01J0000000000000000000000J",
@@ -126,25 +214,46 @@
             "type": "patch",
             "entityKind": "person",
             "id": "p-unknown",
-            "fields": { "name": "nobody" }
+            "fields": {
+              "name": "nobody"
+            }
           }
         },
         {
           "id": "01J0000000000000000000000K",
           "hlc": "0001732180000200:000000:n1",
           "actor": "n1",
-          "body": { "type": "delete", "entityKind": "person", "id": "p-d" }
+          "body": {
+            "type": "delete",
+            "entityKind": "person",
+            "id": "p-d"
+          }
         },
         {
           "id": "01J0000000000000000000000L",
           "hlc": "0001732180000150:000000:n2",
           "actor": "n2",
-          "body": { "type": "patch", "entityKind": "person", "id": "p-d", "fields": { "name": "late" } }
+          "body": {
+            "type": "patch",
+            "entityKind": "person",
+            "id": "p-d",
+            "fields": {
+              "name": "late"
+            }
+          }
         }
       ],
       "expect": [
-        { "kind": "person", "id": "p-unknown", "fields": null },
-        { "kind": "person", "id": "p-d", "fields": null }
+        {
+          "kind": "person",
+          "id": "p-unknown",
+          "fields": null
+        },
+        {
+          "kind": "person",
+          "id": "p-d",
+          "fields": null
+        }
       ]
     },
     {
@@ -169,24 +278,46 @@
           "id": "01J0000000000000000000000M",
           "hlc": "0001732180000100:000000:n1",
           "actor": "n1",
-          "body": { "type": "patch", "entityKind": "task", "id": "t-1", "fields": { "column": "working" } }
+          "body": {
+            "type": "patch",
+            "entityKind": "task",
+            "id": "t-1",
+            "fields": {
+              "column": "working"
+            }
+          }
         },
         {
           "id": "01J0000000000000000000000M",
           "hlc": "0001732180000100:000000:n1",
           "actor": "n1",
-          "body": { "type": "patch", "entityKind": "task", "id": "t-1", "fields": { "column": "working" } }
+          "body": {
+            "type": "patch",
+            "entityKind": "task",
+            "id": "t-1",
+            "fields": {
+              "column": "working"
+            }
+          }
         }
       ],
-      "expect": [{ "kind": "task", "id": "t-1", "fields": { "column": "working" } }]
+      "expect": [
+        {
+          "kind": "task",
+          "id": "t-1",
+          "fields": {
+            "column": "working"
+          }
+        }
+      ]
     }
   ],
   "rules": [
-    "Initial entities carry clock '0' (older than any op).",
-    "A put sets every field it contains to the put's hlc, except fields whose existing clock is newer.",
-    "A patch sets each listed field whose existing clock is older than the patch hlc.",
-    "A delete with hlc newer than the entity's newest field clock removes it and records a tombstone hlc; later-arriving ops with older hlc are ignored, newer puts resurrect.",
+    "Initial entities carry clock '' (older than any op).",
+    "A put or patch sets each field whose clock is older than the op's hlc; a patch to an entity never seen is ignored.",
+    "A delete records a tombstone (newest one wins). An entity is visible iff it has no tombstone or its newest field clock is newer than the tombstone; a deleted entity's data is kept hidden so later ops still update it.",
     "Ops with an id already applied are skipped.",
-    "command and commandResult ops do not change entity state in the reducer."
+    "command and commandResult ops do not change entity state.",
+    "Results must not depend on arrival order, given that a patch never arrives before the put that created its entity."
   ]
 }

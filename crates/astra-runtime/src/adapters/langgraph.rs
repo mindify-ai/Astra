@@ -19,7 +19,11 @@ pub struct LangGraphAdapter {
 fn message_text(m: &Value) -> String {
     match &m["content"] {
         Value::String(s) => s.clone(),
-        Value::Array(parts) => parts.iter().filter_map(|p| p["text"].as_str()).collect::<Vec<_>>().join(""),
+        Value::Array(parts) => parts
+            .iter()
+            .filter_map(|p| p["text"].as_str())
+            .collect::<Vec<_>>()
+            .join(""),
         _ => String::new(),
     }
 }
@@ -28,6 +32,7 @@ fn is_ai(m: &Value) -> bool {
     m["type"] == "ai" || m["role"] == "assistant" || m["type"] == "AIMessageChunk"
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_stream(
     http: &reqwest::Client,
     base: &str,
@@ -59,12 +64,18 @@ async fn run_stream(
             Some("error") => return Err(format!("LangGraph error: {}", ev.data)),
             Some("end") => return Ok(true),
             Some("values") | None => {
-                let Ok(v) = serde_json::from_str::<Value>(&ev.data) else { return Ok(false) };
-                let Some(msgs) = v["messages"].as_array() else { return Ok(false) };
+                let Ok(v) = serde_json::from_str::<Value>(&ev.data) else {
+                    return Ok(false);
+                };
+                let Some(msgs) = v["messages"].as_array() else {
+                    return Ok(false);
+                };
                 if let Some((i, m)) = msgs.iter().enumerate().rev().find(|(_, m)| is_ai(m)) {
                     let text = message_text(m);
                     let new = match &seen {
-                        Some((si, st)) if *si == i => text.strip_prefix(st.as_str()).map(str::to_string),
+                        Some((si, st)) if *si == i => {
+                            text.strip_prefix(st.as_str()).map(str::to_string)
+                        }
                         _ => Some(text.clone()),
                     };
                     match new {
@@ -132,7 +143,10 @@ impl AgentAdapter for LangGraphAdapter {
                     .json()
                     .await
                     .map_err(|e| e.without_url().to_string())?;
-                let thread_id = thread["thread_id"].as_str().ok_or("LangGraph returned no thread_id")?.to_string();
+                let thread_id = thread["thread_id"]
+                    .as_str()
+                    .ok_or("LangGraph returned no thread_id")?
+                    .to_string();
                 ctx.logs.push(format!("langgraph thread {thread_id}"));
                 let mut prompt = Some(ctx.prompt.clone());
                 let mut queued = Vec::new();
@@ -145,14 +159,23 @@ impl AgentAdapter for LangGraphAdapter {
                         }
                         continue;
                     };
-                    let finished =
-                        run_stream(&http, &base, &thread_id, &graph, &p, &ev_tx, &mut ctl_rx, &mut queued).await?;
+                    let finished = run_stream(
+                        &http,
+                        &base,
+                        &thread_id,
+                        &graph,
+                        &p,
+                        &ev_tx,
+                        &mut ctl_rx,
+                        &mut queued,
+                    )
+                    .await?;
                     if !finished {
                         return Ok(());
                     }
                     let _ = ev_tx.send(AgentEvent::TurnDone);
                     if !queued.is_empty() {
-                        prompt = Some(queued.drain(..).collect::<Vec<_>>().join("\n\n"));
+                        prompt = Some(std::mem::take(&mut queued).join("\n\n"));
                     }
                 }
             }
@@ -162,6 +185,9 @@ impl AgentAdapter for LangGraphAdapter {
             }
             let _ = ev_tx.send(AgentEvent::Exited);
         });
-        Ok(AgentSession { control: ctl_tx, events: ev_rx })
+        Ok(AgentSession {
+            control: ctl_tx,
+            events: ev_rx,
+        })
     }
 }

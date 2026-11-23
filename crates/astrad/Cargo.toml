@@ -10,7 +10,7 @@ rust-version.workspace = true
 astra-protocol.workspace = true
 astra-store.workspace = true
 astra-sync.workspace = true
-astra-node = { workspace = true, features = ["runtime"] }
+astra-node = { workspace = true, features = ["runtime", "keyring"] }
 serde.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true
@@ -34,6 +34,9 @@ tokio-tungstenite.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+astra-server.workspace = true
+reqwest.workspace = true
+astra-runtime.workspace = true
 
 [lints]
 workspace = true

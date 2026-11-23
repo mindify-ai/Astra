@@ -9,35 +9,75 @@ use crate::hlc::Hlc;
 
 /// A side effect addressed to a runner node (tagged by `type`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum Command {
-    StartMission { mission_id: String },
-    Approve { approval_id: String },
-    Deny { approval_id: String },
-    SendMessage { mission_id: String, to: Option<String>, body: String },
-    TakeSteering { mission_agent_id: String },
-    ReleaseSteering { mission_agent_id: String },
-    Pause { mission_agent_id: String },
-    Resume { mission_agent_id: String },
-    Merge { result_id: String },
-    ConnectAgent { agent_id: String },
-    TestAgent { agent_id: String },
+    StartMission {
+        mission_id: String,
+    },
+    Approve {
+        approval_id: String,
+    },
+    Deny {
+        approval_id: String,
+    },
+    SendMessage {
+        mission_id: String,
+        to: Option<String>,
+        body: String,
+    },
+    TakeSteering {
+        mission_agent_id: String,
+    },
+    ReleaseSteering {
+        mission_agent_id: String,
+    },
+    Pause {
+        mission_agent_id: String,
+    },
+    Resume {
+        mission_agent_id: String,
+    },
+    Merge {
+        result_id: String,
+    },
+    ConnectAgent {
+        agent_id: String,
+    },
+    TestAgent {
+        agent_id: String,
+    },
 }
 
 /// The payload of an op (tagged by `type`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum OpBody {
     /// Create or replace an entity (LWW per field).
     Put { entity: Entity },
     /// Update some fields (LWW per field). Ignored if the entity is unknown.
-    Patch { entity_kind: EntityKind, id: String, fields: BTreeMap<String, serde_json::Value> },
+    Patch {
+        entity_kind: EntityKind,
+        id: String,
+        fields: BTreeMap<String, serde_json::Value>,
+    },
     /// Tombstone an entity.
     Delete { entity_kind: EntityKind, id: String },
     /// A side effect for runner node `node`.
     Command { node: String, command: Command },
     /// Outcome of a command, appended by the node that executed it.
-    CommandResult { command_op: String, ok: bool, error: Option<String> },
+    CommandResult {
+        command_op: String,
+        ok: bool,
+        error: Option<String>,
+    },
 }
 
 impl OpBody {
@@ -56,7 +96,9 @@ impl OpBody {
 
     /// A put body.
     pub fn put(entity: impl Into<Entity>) -> OpBody {
-        OpBody::Put { entity: entity.into() }
+        OpBody::Put {
+            entity: entity.into(),
+        }
     }
 }
 
@@ -75,7 +117,12 @@ pub struct Op {
 impl Op {
     /// A new op with a fresh ULID.
     pub fn new(hlc: Hlc, actor: impl Into<String>, body: OpBody) -> Op {
-        Op { id: new_op_id(), hlc, actor: actor.into(), body }
+        Op {
+            id: new_op_id(),
+            hlc,
+            actor: actor.into(),
+            body,
+        }
     }
 
     /// The command and target node if this is a command op.

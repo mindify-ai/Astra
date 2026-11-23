@@ -16,15 +16,24 @@ struct Sequence {
 
 impl Respond for Sequence {
     fn respond(&self, _req: &Request) -> ResponseTemplate {
-        let i = self.n.fetch_add(1, Ordering::SeqCst).min(self.bodies.len() - 1);
-        ResponseTemplate::new(200).insert_header("content-type", "text/event-stream").set_body_string(self.bodies[i].clone())
+        let i = self
+            .n
+            .fetch_add(1, Ordering::SeqCst)
+            .min(self.bodies.len() - 1);
+        ResponseTemplate::new(200)
+            .insert_header("content-type", "text/event-stream")
+            .set_body_string(self.bodies[i].clone())
     }
 }
 
 fn sse(events: &[Value]) -> String {
     let mut out = String::new();
     for e in events {
-        out.push_str(&format!("event: {}\ndata: {}\n\n", e["type"].as_str().expect("type"), e));
+        out.push_str(&format!(
+            "event: {}\ndata: {}\n\n",
+            e["type"].as_str().expect("type"),
+            e
+        ));
     }
     out
 }
@@ -80,7 +89,10 @@ async fn mock(bodies: Vec<String>) -> MockServer {
         .and(header("x-api-key", "test-key"))
         .and(header("anthropic-version", "2026-10-21"))
         .and(header("anthropic-beta", "server-side-fallback-2026-07-01"))
-        .respond_with(Sequence { bodies, n: AtomicUsize::new(0) })
+        .respond_with(Sequence {
+            bodies,
+            n: AtomicUsize::new(0),
+        })
         .mount(&server)
         .await;
     server
@@ -103,7 +115,11 @@ async fn bodies(server: &MockServer) -> Vec<Value> {
         .collect()
 }
 
-fn agent(server: &MockServer, dir: &std::path::Path, approver: Arc<dyn CommandApprover>) -> AgentLoop {
+fn agent(
+    server: &MockServer,
+    dir: &std::path::Path,
+    approver: Arc<dyn CommandApprover>,
+) -> AgentLoop {
     let tools = Toolset::new(Workspace::new(dir).expect("ws"), approver);
     AgentLoop::new(provider(server), tools, astra_llm::agent::DEFAULT_SYSTEM).expect("loop")
 }
@@ -115,7 +131,12 @@ async fn text_only_turn_and_request_shape() {
     let mut a = agent(&server, dir.path(), Arc::new(DenyAllCommands));
     let (tx, mut rx) = mpsc::unbounded_channel();
     let out = a.run("hi", &tx).await.expect("run");
-    assert_eq!(out, LoopOutcome::Done { text: "Hello there".into() });
+    assert_eq!(
+        out,
+        LoopOutcome::Done {
+            text: "Hello there".into()
+        }
+    );
     let mut deltas = String::new();
     while let Ok(e) = rx.try_recv() {
         if let LoopEvent::TextDelta(t) = e {
@@ -135,20 +156,38 @@ async fn text_only_turn_and_request_shape() {
     for forbidden in ["temperature", "top_p", "top_k"] {
         assert!(body.get(forbidden).is_none());
     }
-    assert_eq!(body["system"][0]["cache_control"], json!({"type":"ephemeral"}));
+    assert_eq!(
+        body["system"][0]["cache_control"],
+        json!({"type":"ephemeral"})
+    );
     let tools = body["tools"].as_array().expect("tools");
     assert!(tools.iter().all(|t| t["eager_input_streaming"] == true));
-    assert!(tools[..tools.len() - 1].iter().all(|t| t.get("cache_control").is_none()));
-    assert_eq!(tools[tools.len() - 1]["cache_control"], json!({"type":"ephemeral"}));
+    assert!(
+        tools[..tools.len() - 1]
+            .iter()
+            .all(|t| t.get("cache_control").is_none())
+    );
+    assert_eq!(
+        tools[tools.len() - 1]["cache_control"],
+        json!({"type":"ephemeral"})
+    );
     // Thinking block (with signature) kept in history unchanged.
     let raw = &a.history()[1].raw.as_ref().expect("raw").1;
-    assert_eq!(raw[0], json!({"type":"thinking","thinking":"","signature":"sig-abc"}));
+    assert_eq!(
+        raw[0],
+        json!({"type":"thinking","thinking":"","signature":"sig-abc"})
+    );
 }
 
 #[tokio::test]
 async fn tool_use_then_result_loop() {
     let server = mock(vec![
-        tool_turn("toolu_1", "write_file", &["{\"path\": \"notes/a.txt\", ", "\"content\": \"hi\"}"], "tool_use"),
+        tool_turn(
+            "toolu_1",
+            "write_file",
+            &["{\"path\": \"notes/a.txt\", ", "\"content\": \"hi\"}"],
+            "tool_use",
+        ),
         text_turn("Wrote the file"),
     ])
     .await;
@@ -156,11 +195,24 @@ async fn tool_use_then_result_loop() {
     let mut a = agent(&server, dir.path(), Arc::new(DenyAllCommands));
     let (tx, mut rx) = mpsc::unbounded_channel();
     let out = a.run("write a note", &tx).await.expect("run");
-    assert_eq!(out, LoopOutcome::Done { text: "Wrote the file".into() });
-    assert_eq!(std::fs::read_to_string(dir.path().join("notes/a.txt")).expect("file"), "hi");
+    assert_eq!(
+        out,
+        LoopOutcome::Done {
+            text: "Wrote the file".into()
+        }
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("notes/a.txt")).expect("file"),
+        "hi"
+    );
     let mut saw_log = false;
     while let Ok(e) = rx.try_recv() {
-        if let LoopEvent::ToolFinished { log: Some((verb, target)), is_error: false, .. } = e {
+        if let LoopEvent::ToolFinished {
+            log: Some((verb, target)),
+            is_error: false,
+            ..
+        } = e
+        {
             saw_log = verb == "edit" && target == "notes/a.txt";
         }
     }
@@ -171,8 +223,14 @@ async fn tool_use_then_result_loop() {
     let msgs = reqs[1]["messages"].as_array().expect("messages");
     assert_eq!(msgs.len(), 3);
     // Assistant content replayed verbatim, thinking block included.
-    assert_eq!(msgs[1]["content"][0], json!({"type":"thinking","thinking":"","signature":"sig-1"}));
-    assert_eq!(msgs[1]["content"][1]["input"], json!({"path":"notes/a.txt","content":"hi"}));
+    assert_eq!(
+        msgs[1]["content"][0],
+        json!({"type":"thinking","thinking":"","signature":"sig-1"})
+    );
+    assert_eq!(
+        msgs[1]["content"][1]["input"],
+        json!({"path":"notes/a.txt","content":"hi"})
+    );
     // One user message with the tool result.
     assert_eq!(msgs[2]["role"], "user");
     assert_eq!(msgs[2]["content"].as_array().expect("content").len(), 1);
@@ -185,9 +243,19 @@ async fn tool_use_then_result_loop() {
 async fn invalid_tool_input_returns_is_error() {
     let server = mock(vec![
         // Missing required `content`, plus an unknown property.
-        tool_turn("toolu_2", "write_file", &["{\"path\": \"x.txt\", \"bogus\": 1}"], "tool_use"),
+        tool_turn(
+            "toolu_2",
+            "write_file",
+            &["{\"path\": \"x.txt\", \"bogus\": 1}"],
+            "tool_use",
+        ),
         // Truncated / invalid JSON.
-        tool_turn("toolu_3", "write_file", &["{\"path\": \"y.txt\", \"content\": \"unterminated"], "tool_use"),
+        tool_turn(
+            "toolu_3",
+            "write_file",
+            &["{\"path\": \"y.txt\", \"content\": \"unterminated"],
+            "tool_use",
+        ),
         text_turn("Giving up"),
     ])
     .await;
@@ -195,7 +263,12 @@ async fn invalid_tool_input_returns_is_error() {
     let mut a = agent(&server, dir.path(), Arc::new(DenyAllCommands));
     let (tx, _rx) = mpsc::unbounded_channel();
     let out = a.run("go", &tx).await.expect("run");
-    assert_eq!(out, LoopOutcome::Done { text: "Giving up".into() });
+    assert_eq!(
+        out,
+        LoopOutcome::Done {
+            text: "Giving up".into()
+        }
+    );
     assert!(!dir.path().join("x.txt").exists());
     assert!(!dir.path().join("y.txt").exists());
     let reqs = bodies(&server).await;
@@ -204,19 +277,33 @@ async fn invalid_tool_input_returns_is_error() {
     assert!(r1["content"].as_str().expect("s").contains("bogus"), "{r1}");
     let r2 = &reqs[2]["messages"][4]["content"][0];
     assert_eq!(r2["is_error"], true);
-    assert!(r2["content"].as_str().expect("s").contains("unterminated"), "{r2}");
+    assert!(
+        r2["content"].as_str().expect("s").contains("unterminated"),
+        "{r2}"
+    );
     // The unparseable tool_use is replayed with an object input.
     assert_eq!(reqs[2]["messages"][3]["content"][1]["input"], json!({}));
 }
 
 #[tokio::test]
 async fn refusal_stops_without_running_tools() {
-    let server = mock(vec![tool_turn("toolu_4", "write_file", &["{\"path\":\"r.txt\",\"content\":\"x\"}"], "refusal")]).await;
+    let server = mock(vec![tool_turn(
+        "toolu_4",
+        "write_file",
+        &["{\"path\":\"r.txt\",\"content\":\"x\"}"],
+        "refusal",
+    )])
+    .await;
     let dir = tempfile::tempdir().expect("tmp");
     let mut a = agent(&server, dir.path(), Arc::new(DenyAllCommands));
     let (tx, _rx) = mpsc::unbounded_channel();
     let out = a.run("go", &tx).await.expect("run");
-    assert_eq!(out, LoopOutcome::Refused { explanation: Some("declined".into()) });
+    assert_eq!(
+        out,
+        LoopOutcome::Refused {
+            explanation: Some("declined".into())
+        }
+    );
     assert!(!dir.path().join("r.txt").exists());
     assert_eq!(bodies(&server).await.len(), 1);
 }
@@ -224,14 +311,22 @@ async fn refusal_stops_without_running_tools() {
 #[tokio::test]
 async fn max_tokens_with_tool_use_is_not_run_and_retried() {
     let server = mock(vec![
-        tool_turn("toolu_5", "write_file", &["{\"path\":\"m.txt\",\"content\":\"partial"], "max_tokens"),
+        tool_turn(
+            "toolu_5",
+            "write_file",
+            &["{\"path\":\"m.txt\",\"content\":\"partial"],
+            "max_tokens",
+        ),
         text_turn("ok"),
     ])
     .await;
     let dir = tempfile::tempdir().expect("tmp");
     let mut a = agent(&server, dir.path(), Arc::new(DenyAllCommands));
     let (tx, _rx) = mpsc::unbounded_channel();
-    assert_eq!(a.run("go", &tx).await.expect("run"), LoopOutcome::Done { text: "ok".into() });
+    assert_eq!(
+        a.run("go", &tx).await.expect("run"),
+        LoopOutcome::Done { text: "ok".into() }
+    );
     assert!(!dir.path().join("m.txt").exists());
     let reqs = bodies(&server).await;
     let note = &reqs[1]["messages"][2]["content"][0];
@@ -243,12 +338,21 @@ async fn max_tokens_with_tool_use_is_not_run_and_retried() {
 async fn api_errors_surface_without_key() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
-        .respond_with(ResponseTemplate::new(400).set_body_json(json!({"type":"error","error":{"type":"invalid_request_error","message":"bad"}})))
+        .respond_with(ResponseTemplate::new(400).set_body_json(
+            json!({"type":"error","error":{"type":"invalid_request_error","message":"bad"}}),
+        ))
         .mount(&server)
         .await;
     let p = provider(&server);
     let err = p
-        .turn(TurnRequest { system: "s", tools: &[], messages: &[ChatMessage::user("x")] }, &|_| {})
+        .turn(
+            TurnRequest {
+                system: "s",
+                tools: &[],
+                messages: &[ChatMessage::user("x")],
+            },
+            &|_| {},
+        )
         .await
         .expect_err("should fail");
     let msg = err.to_string();
@@ -262,7 +366,9 @@ async fn openai_compat_streaming_tool_call_and_detection() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/v1/models"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"data":[{"id":"qwen3-coder"}]})))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"data":[{"id":"qwen3-coder"}]})),
+        )
         .mount(&server)
         .await;
     let chunk = |d: Value| format!("data: {}\n\n", json!({"choices":[d]}));
@@ -281,17 +387,30 @@ async fn openai_compat_streaming_tool_call_and_detection() {
     .concat();
     Mock::given(method("POST"))
         .and(path("/v1/chat/completions"))
-        .respond_with(Sequence { bodies: vec![first, second], n: AtomicUsize::new(0) })
+        .respond_with(Sequence {
+            bodies: vec![first, second],
+            n: AtomicUsize::new(0),
+        })
         .mount(&server)
         .await;
 
     let base = format!("{}/v1", server.uri());
     let found = astra_llm::openai::detect_servers(
-        &[("dead".into(), "http://127.0.0.1:9/v1".into()), ("mock".into(), base.clone())],
+        &[
+            ("dead".into(), "http://127.0.0.1:9/v1".into()),
+            ("mock".into(), base.clone()),
+        ],
         std::time::Duration::from_millis(500),
     )
     .await;
-    assert_eq!(found, vec![LocalServer { kind: "mock".into(), base_url: base.clone(), models: vec!["qwen3-coder".into()] }]);
+    assert_eq!(
+        found,
+        vec![LocalServer {
+            kind: "mock".into(),
+            base_url: base.clone(),
+            models: vec!["qwen3-coder".into()]
+        }]
+    );
 
     let mut rc = RouterConfig::new(RoutingPolicy::Auto, None);
     rc.local_candidates = vec![("mock".into(), base)];
@@ -299,13 +418,27 @@ async fn openai_compat_streaming_tool_call_and_detection() {
     assert_eq!(p.name(), "mock:qwen3-coder");
 
     let dir = tempfile::tempdir().expect("tmp");
-    let tools = Toolset::new(Workspace::new(dir.path()).expect("ws"), Arc::new(DenyAllCommands));
+    let tools = Toolset::new(
+        Workspace::new(dir.path()).expect("ws"),
+        Arc::new(DenyAllCommands),
+    );
     let mut a = AgentLoop::new(p, tools, "sys").expect("loop");
     let (tx, _rx) = mpsc::unbounded_channel();
-    assert_eq!(a.run("go", &tx).await.expect("run"), LoopOutcome::Done { text: "Done locally".into() });
-    assert_eq!(std::fs::read_to_string(dir.path().join("o.txt")).expect("file"), "local");
+    assert_eq!(
+        a.run("go", &tx).await.expect("run"),
+        LoopOutcome::Done {
+            text: "Done locally".into()
+        }
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("o.txt")).expect("file"),
+        "local"
+    );
     let reqs = bodies(&server).await;
-    let chat: Vec<&Value> = reqs.iter().filter(|b| b.get("messages").is_some()).collect();
+    let chat: Vec<&Value> = reqs
+        .iter()
+        .filter(|b| b.get("messages").is_some())
+        .collect();
     let msgs = chat[1]["messages"].as_array().expect("messages");
     assert_eq!(msgs[2]["tool_calls"][0]["id"], "call_a");
     assert_eq!(msgs[3]["role"], "tool");
@@ -318,5 +451,8 @@ async fn router_cloud_policy_requires_key() {
     assert!(matches!(r.select().await, Err(LlmError::NoProvider(_))));
     let mut rc = RouterConfig::new(RoutingPolicy::Local, None);
     rc.local_candidates = vec![("dead".into(), "http://127.0.0.1:9/v1".into())];
-    assert!(matches!(Router::new(rc).select().await, Err(LlmError::NoProvider(_))));
+    assert!(matches!(
+        Router::new(rc).select().await,
+        Err(LlmError::NoProvider(_))
+    ));
 }

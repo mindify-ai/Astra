@@ -1,4 +1,5 @@
 import { ulid } from './hlc'
+import { mayDecide, maySteer } from './policy'
 import { type SeedFile, Store, stateFromSeed } from './store'
 import type {
   Command,
@@ -109,14 +110,6 @@ export class MockClient extends Store {
     return Object.values(s.missionAgents).filter((m) => m.missionId === missionId && m.enabled)
   }
 
-  private canApprove(s: State, actor: Id, missionId: Id): boolean {
-    const mission = s.missions[missionId]
-    if (!mission) return false
-    if (mission.ownerId === actor) return true
-    const access = s.memberships[`${missionId}:${actor}`]?.access
-    return mission.approvalPolicy === 'steerers' && access === 'steer'
-  }
-
   private handle(op: Op, node: Id, cmd: Command) {
     this.later(() => {
       const s = this.state
@@ -125,7 +118,8 @@ export class MockClient extends Store {
         case 'deny': {
           const a = s.approvals[cmd.approvalId]
           if (a?.state !== 'pending') return this.ok(node, op, 'approval is not pending')
-          if (!this.canApprove(s, op.actor, a.missionId)) return this.ok(node, op, 'not allowed to approve')
+          if (!mayDecide(s, a.missionId, op.actor, a.missionAgentId))
+            return this.ok(node, op, 'not allowed to approve')
           const allow = cmd.type === 'approve'
           const ma = s.missionAgents[a.missionAgentId]
           const task = Object.values(s.tasks).find((t) => t.approvalId === a.id)
@@ -137,11 +131,15 @@ export class MockClient extends Store {
             }),
             this.patch('missionAgent', a.missionAgentId, { status: allow ? 'working' : 'idle' }),
           ]
-          if (task) bodies.push(this.patch('task', task.id, { column: allow ? 'done' : 'queued' }))
-          const integration = Object.values(s.tasks).find(
-            (t) => t.missionAgentId === a.missionAgentId && t.column === 'queued' && t.id !== task?.id,
-          )
-          if (allow && integration) bodies.push(this.patch('task', integration.id, { column: 'working' }))
+          // Same as the runtime: approving resumes the linked task; denying closes it with a note.
+          if (task)
+            bodies.push(
+              this.patch(
+                'task',
+                task.id,
+                allow ? { column: 'working' } : { column: 'done', note: `Denied by ${op.actor}` },
+              ),
+            )
           if (allow && ma) {
             const log: LogLine[] = a.command ? [{ verb: 'run', target: a.command }] : []
             bodies.push(
@@ -156,6 +154,7 @@ export class MockClient extends Store {
           return this.ok(node, op)
         }
         case 'sendMessage': {
+          if (!maySteer(s, cmd.missionId, op.actor)) return this.ok(node, op, 'not allowed to steer')
           const target = cmd.to
             ? s.missionAgents[cmd.to]
             : this.agentsOf(s, cmd.missionId).find((m) => m.role === 'planner')
@@ -170,9 +169,12 @@ export class MockClient extends Store {
           this.node(node, bodies)
           return this.ok(node, op)
         }
-        case 'takeSteering':
+        case 'takeSteering': {
+          const ma = s.missionAgents[cmd.missionAgentId]
+          if (!ma || !maySteer(s, ma.missionId, op.actor)) return this.ok(node, op, 'not allowed to steer')
           this.node(node, [this.patch('missionAgent', cmd.missionAgentId, { steeredBy: op.actor })])
           return this.ok(node, op)
+        }
         case 'releaseSteering':
           this.node(node, [this.patch('missionAgent', cmd.missionAgentId, { steeredBy: null })])
           return this.ok(node, op)
@@ -220,7 +222,8 @@ export class MockClient extends Store {
     const r = s.results[resultId]
     const mission = r ? s.missions[r.missionId] : undefined
     if (!r || !mission) return this.ok(node, op, 'unknown result')
-    if (!this.canApprove(s, op.actor, mission.id)) return this.ok(node, op, 'not allowed to merge')
+    if (!mayDecide(s, mission.id, op.actor, r.missionAgentId))
+      return this.ok(node, op, 'not allowed to merge')
     const repo = s.repositories[mission.repoId]
     const others = Object.values(s.results).filter((x) => x.missionId === mission.id && x.id !== r.id)
     const pick = Object.values(s.tasks).find(

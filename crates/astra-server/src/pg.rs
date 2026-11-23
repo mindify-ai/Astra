@@ -2,9 +2,9 @@
 
 use astra_protocol::{Op, OpBody};
 use astra_sync::{OpLog, SyncError};
+use sqlx::Row;
 use sqlx::postgres::PgPool;
 use sqlx::types::Json;
-use sqlx::Row;
 
 /// Op log in Postgres. Sequence numbers come from a per-workspace counter row locked with
 /// `SELECT ... FOR UPDATE`, so concurrent appends (even from several server instances) stay gap-free.
@@ -47,7 +47,8 @@ impl OpLog for PgOpLog {
             .map_err(db)?;
         let mut stored = Vec::new();
         for op in ops {
-            let body = serde_json::to_value(&op.body).map_err(|e| SyncError::Codec(e.to_string()))?;
+            let body =
+                serde_json::to_value(&op.body).map_err(|e| SyncError::Codec(e.to_string()))?;
             let inserted = sqlx::query(
                 "INSERT INTO ops (workspace_id, seq, op_id, hlc, actor, body) VALUES ($1, $2, $3, $4, $5, $6)
                  ON CONFLICT (op_id) DO NOTHING",
@@ -77,7 +78,12 @@ impl OpLog for PgOpLog {
         Ok(stored)
     }
 
-    async fn since(&self, workspace: &str, cursor: u64, limit: usize) -> astra_sync::Result<Vec<(u64, Op)>> {
+    async fn since(
+        &self,
+        workspace: &str,
+        cursor: u64,
+        limit: usize,
+    ) -> astra_sync::Result<Vec<(u64, Op)>> {
         let rows = sqlx::query(
             "SELECT seq, op_id, hlc, actor, body FROM ops WHERE workspace_id = $1 AND seq > $2 ORDER BY seq LIMIT $3",
         )
@@ -94,9 +100,12 @@ impl OpLog for PgOpLog {
                 let Json(body): Json<serde_json::Value> = r.try_get(4).map_err(db)?;
                 let op = Op {
                     id: r.try_get(1).map_err(db)?,
-                    hlc: hlc.parse().map_err(|e: astra_protocol::HlcParseError| SyncError::Storage(e.to_string()))?,
+                    hlc: hlc.parse().map_err(|e: astra_protocol::HlcParseError| {
+                        SyncError::Storage(e.to_string())
+                    })?,
                     actor: r.try_get(3).map_err(db)?,
-                    body: serde_json::from_value::<OpBody>(body).map_err(|e| SyncError::Codec(e.to_string()))?,
+                    body: serde_json::from_value::<OpBody>(body)
+                        .map_err(|e| SyncError::Codec(e.to_string()))?,
                 };
                 Ok((u64::try_from(seq).unwrap_or(0), op))
             })
@@ -166,10 +175,12 @@ pub async fn upsert_person(
     .bind(id)
     .execute(&mut *tx)
     .await?;
-    let rows = sqlx::query("SELECT workspace_id FROM memberships WHERE person_id = $1 ORDER BY workspace_id")
-        .bind(id)
-        .fetch_all(&mut *tx)
-        .await?;
+    let rows = sqlx::query(
+        "SELECT workspace_id FROM memberships WHERE person_id = $1 ORDER BY workspace_id",
+    )
+    .bind(id)
+    .fetch_all(&mut *tx)
+    .await?;
     tx.commit().await?;
     rows.into_iter().map(|r| r.try_get(0)).collect()
 }

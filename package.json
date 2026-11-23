@@ -12,7 +12,8 @@
     "test": "turbo run test",
     "lint": "biome check .",
     "format": "biome format --write .",
-    "tokens": "pnpm --filter @astra/tokens build"
+    "tokens": "pnpm --filter @astra/tokens build",
+    "e2e": "cargo build -p astra-server -p astrad && node scripts/e2e-stack.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.8",

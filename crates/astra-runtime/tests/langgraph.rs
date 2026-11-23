@@ -3,10 +3,12 @@
 use std::sync::Arc;
 
 use astra_protocol::{CommandPolicy, Role};
-use astra_runtime::adapters::langgraph::LangGraphAdapter;
-use astra_runtime::adapters::{AgentAdapter, AgentContext, AgentControl, AgentEvent, Approver, PermissionRequest};
-use astra_runtime::process::LogRing;
 use astra_runtime::MemorySecrets;
+use astra_runtime::adapters::langgraph::LangGraphAdapter;
+use astra_runtime::adapters::{
+    AgentAdapter, AgentContext, AgentControl, AgentEvent, Approver, PermissionRequest,
+};
+use astra_runtime::process::LogRing;
 use serde_json::json;
 use wiremock::matchers::{body_partial_json, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -37,13 +39,22 @@ async fn streams_values_into_text() {
     .concat();
     Mock::given(method("POST"))
         .and(path("/threads/th-1/runs/stream"))
-        .and(body_partial_json(json!({"assistant_id": "qa-graph", "stream_mode": ["values"]})))
-        .respond_with(ResponseTemplate::new(200).insert_header("content-type", "text/event-stream").set_body_string(sse))
+        .and(body_partial_json(
+            json!({"assistant_id": "qa-graph", "stream_mode": ["values"]}),
+        ))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(sse),
+        )
         .mount(&server)
         .await;
 
     let tmp = tempfile::tempdir().expect("tmp");
-    let adapter = LangGraphAdapter { endpoint: server.uri(), graph: "qa-graph".into() };
+    let adapter = LangGraphAdapter {
+        endpoint: server.uri(),
+        graph: "qa-graph".into(),
+    };
     let mut session = adapter
         .start(AgentContext {
             mission_agent_id: "ma".into(),
@@ -58,7 +69,10 @@ async fn streams_values_into_text() {
         .expect("start");
     let mut text = String::new();
     loop {
-        match tokio::time::timeout(std::time::Duration::from_secs(5), session.events.recv()).await.expect("event") {
+        match tokio::time::timeout(std::time::Duration::from_secs(5), session.events.recv())
+            .await
+            .expect("event")
+        {
             Some(AgentEvent::Text(t)) => text.push_str(&t),
             Some(AgentEvent::TurnDone) => break,
             other => panic!("unexpected {other:?}"),

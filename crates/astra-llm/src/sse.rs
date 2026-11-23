@@ -29,7 +29,8 @@ impl SseParser {
             Err(e) => e.valid_up_to(),
         };
         let chunk: Vec<u8> = self.pending_bytes.drain(..valid).collect();
-        self.buf.push_str(&String::from_utf8_lossy(&chunk).replace("\r\n", "\n"));
+        self.buf
+            .push_str(&String::from_utf8_lossy(&chunk).replace("\r\n", "\n"));
         let mut out = Vec::new();
         while let Some(pos) = self.buf.find("\n\n") {
             let block: String = self.buf.drain(..pos + 2).collect();
@@ -67,7 +68,10 @@ fn parse_block(block: &str) -> Option<SseEvent> {
     if event.is_none() && data.is_empty() {
         return None;
     }
-    Some(SseEvent { event, data: data.join("\n") })
+    Some(SseEvent {
+        event,
+        data: data.join("\n"),
+    })
 }
 
 #[cfg(test)]
@@ -82,8 +86,14 @@ mod tests {
         assert_eq!(
             evs,
             vec![
-                SseEvent { event: Some("ping".into()), data: "{\"a\":1}".into() },
-                SseEvent { event: None, data: "x\ny".into() }
+                SseEvent {
+                    event: Some("ping".into()),
+                    data: "{\"a\":1}".into()
+                },
+                SseEvent {
+                    event: None,
+                    data: "x\ny".into()
+                }
             ]
         );
         // Multi-byte char split across chunks.

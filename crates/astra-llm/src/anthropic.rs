@@ -107,7 +107,9 @@ pub struct AnthropicProvider {
 impl AnthropicProvider {
     /// A provider with its own HTTP client.
     pub fn new(config: AnthropicConfig) -> Result<Self> {
-        let http = reqwest::Client::builder().connect_timeout(Duration::from_secs(10)).build()?;
+        let http = reqwest::Client::builder()
+            .connect_timeout(Duration::from_secs(10))
+            .build()?;
         Ok(AnthropicProvider { config, http })
     }
 
@@ -172,7 +174,10 @@ impl AnthropicProvider {
                 Ok(r) => {
                     let status = r.status().as_u16();
                     let retryable = matches!(status, 408 | 409 | 429 | 500..=599)
-                        && r.headers().get("x-should-retry").and_then(|v| v.to_str().ok()) != Some("false");
+                        && r.headers()
+                            .get("x-should-retry")
+                            .and_then(|v| v.to_str().ok())
+                            != Some("false");
                     let after = r
                         .headers()
                         .get("retry-after")
@@ -196,7 +201,9 @@ impl AnthropicProvider {
                 }
             };
             attempt += 1;
-            let wait = retry_after.map(Duration::from_secs).unwrap_or(Duration::from_millis(500 * 2u64.pow(attempt)));
+            let wait = retry_after
+                .map(Duration::from_secs)
+                .unwrap_or(Duration::from_millis(500 * 2u64.pow(attempt)));
             tokio::time::sleep(wait.min(Duration::from_secs(30))).await;
         }
     }
@@ -208,10 +215,10 @@ pub fn message_json(m: &ChatMessage) -> Value {
         ChatRole::User => "user",
         ChatRole::Assistant => "assistant",
     };
-    if let Some((provider, raw)) = &m.raw {
-        if provider == "anthropic" {
-            return json!({"role": role, "content": raw});
-        }
+    if let Some((provider, raw)) = &m.raw
+        && provider == "anthropic"
+    {
+        return json!({"role": role, "content": raw});
     }
     let content: Vec<Value> = m
         .blocks
@@ -261,7 +268,11 @@ impl MessageAccumulator {
                 let index = index_of(&v)?;
                 self.blocks.insert(
                     index,
-                    BlockAcc { block: v["content_block"].clone(), json_buf: String::new(), stopped: false },
+                    BlockAcc {
+                        block: v["content_block"].clone(),
+                        json_buf: String::new(),
+                        stopped: false,
+                    },
                 );
             }
             "content_block_delta" => {
@@ -278,19 +289,30 @@ impl MessageAccumulator {
                         on_event(StreamEvent::TextDelta(t.to_string()));
                     }
                     "input_json_delta" => {
-                        acc.json_buf.push_str(delta["partial_json"].as_str().unwrap_or_default());
+                        acc.json_buf
+                            .push_str(delta["partial_json"].as_str().unwrap_or_default());
                         on_event(StreamEvent::ToolInputDelta { index });
                     }
                     "thinking_delta" => {
-                        append_str(&mut acc.block, "thinking", delta["thinking"].as_str().unwrap_or_default());
+                        append_str(
+                            &mut acc.block,
+                            "thinking",
+                            delta["thinking"].as_str().unwrap_or_default(),
+                        );
                         on_event(StreamEvent::Thinking);
                     }
                     "signature_delta" => {
-                        append_str(&mut acc.block, "signature", delta["signature"].as_str().unwrap_or_default());
+                        append_str(
+                            &mut acc.block,
+                            "signature",
+                            delta["signature"].as_str().unwrap_or_default(),
+                        );
                     }
                     "citations_delta" => {
                         if let Some(obj) = acc.block.as_object_mut() {
-                            let list = obj.entry("citations").or_insert_with(|| Value::Array(vec![]));
+                            let list = obj
+                                .entry("citations")
+                                .or_insert_with(|| Value::Array(vec![]));
                             if let Some(arr) = list.as_array_mut() {
                                 arr.push(delta["citation"].clone());
                             }
@@ -311,16 +333,24 @@ impl MessageAccumulator {
                 }
                 let details = &v["delta"]["stop_details"];
                 if details.is_object() {
-                    self.refusal = details["explanation"]
-                        .as_str()
-                        .map(str::to_string)
-                        .or_else(|| details["category"].as_str().map(|c| format!("category: {c}")));
+                    self.refusal =
+                        details["explanation"]
+                            .as_str()
+                            .map(str::to_string)
+                            .or_else(|| {
+                                details["category"]
+                                    .as_str()
+                                    .map(|c| format!("category: {c}"))
+                            });
                 }
             }
             "message_stop" => self.done = true,
             "error" => {
                 return Err(LlmError::Stream(
-                    v["error"]["message"].as_str().unwrap_or("unknown stream error").to_string(),
+                    v["error"]["message"]
+                        .as_str()
+                        .unwrap_or("unknown stream error")
+                        .to_string(),
                 ));
             }
             _ => {}
@@ -338,7 +368,9 @@ impl MessageAccumulator {
         let mut tool_calls = Vec::new();
         for (_, mut acc) in self.blocks {
             match acc.block["type"].as_str().unwrap_or_default() {
-                "text" => blocks.push(Block::Text { text: acc.block["text"].as_str().unwrap_or_default().to_string() }),
+                "text" => blocks.push(Block::Text {
+                    text: acc.block["text"].as_str().unwrap_or_default().to_string(),
+                }),
                 "tool_use" => {
                     let id = acc.block["id"].as_str().unwrap_or_default().to_string();
                     let name = acc.block["name"].as_str().unwrap_or_default().to_string();
@@ -348,15 +380,24 @@ impl MessageAccumulator {
                         // No deltas: the start block carried the full input.
                         Ok(acc.block.get("input").cloned().unwrap_or_else(|| json!({})))
                     } else {
-                        serde_json::from_str::<Value>(&acc.json_buf).map_err(|_| acc.json_buf.clone())
+                        serde_json::from_str::<Value>(&acc.json_buf)
+                            .map_err(|_| acc.json_buf.clone())
                     };
                     let history_input = match &parsed {
                         Ok(v) if v.is_object() => v.clone(),
                         _ => json!({}),
                     };
                     acc.block["input"] = history_input.clone();
-                    blocks.push(Block::ToolUse { id: id.clone(), name: name.clone(), input: history_input });
-                    tool_calls.push(ToolCall { id, name, input: parsed });
+                    blocks.push(Block::ToolUse {
+                        id: id.clone(),
+                        name: name.clone(),
+                        input: history_input,
+                    });
+                    tool_calls.push(ToolCall {
+                        id,
+                        name,
+                        input: parsed,
+                    });
                 }
                 _ => {}
             }
@@ -384,7 +425,11 @@ fn index_of(v: &Value) -> Result<usize> {
 
 fn append_str(block: &mut Value, field: &str, add: &str) {
     if let Some(obj) = block.as_object_mut() {
-        let cur = obj.get(field).and_then(Value::as_str).unwrap_or_default().to_string();
+        let cur = obj
+            .get(field)
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
         obj.insert(field.to_string(), Value::String(cur + add));
     }
 }
@@ -395,7 +440,11 @@ impl Provider for AnthropicProvider {
         format!("anthropic:{}", self.config.model)
     }
 
-    async fn turn(&self, req: TurnRequest<'_>, on_event: &(dyn Fn(StreamEvent) + Send + Sync)) -> Result<TurnResponse> {
+    async fn turn(
+        &self,
+        req: TurnRequest<'_>,
+        on_event: &(dyn Fn(StreamEvent) + Send + Sync),
+    ) -> Result<TurnResponse> {
         let body = self.request_body(&req);
         let resp = self.send(&body).await?;
         let mut stream = resp.bytes_stream();

@@ -25,6 +25,9 @@ futures.workspace = true
 async-trait.workspace = true
 tracing.workspace = true
 tokio-tungstenite.workspace = true
+snow.workspace = true
+sha2.workspace = true
+hex.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -10,6 +10,7 @@ import type {
   State,
   TaskColumn,
 } from '@astra/client'
+import { mayDecide, maySteer } from '@astra/client'
 import type { Tone } from '@astra/ui'
 
 export const roleName: Record<Role, string> = {
@@ -105,18 +106,10 @@ export function connectedAgents(s: State): AgentConnection[] {
 
 export const personName = (s: State, id: Id | null) => (id ? (s.people[id]?.name ?? id) : '')
 
-/** Mirrors the runner node's rule (PROTOCOL.md): owner, or steerers when the mission allows it. */
-export function canApprove(s: State, personId: Id, missionId: Id): boolean {
-  const m = s.missions[missionId]
-  if (!m) return false
-  if (m.ownerId === personId) return true
-  return m.approvalPolicy === 'steerers' && s.memberships[`${missionId}:${personId}`]?.access === 'steer'
-}
-
-export function canSteer(s: State, personId: Id, missionId: Id): boolean {
-  const access = s.memberships[`${missionId}:${personId}`]?.access
-  return access === 'owner' || access === 'steer'
-}
+/** The runner node's rules (`@astra/client` policy): who may decide approvals/merges, and who may steer. */
+export const canApprove = (s: State, personId: Id, missionId: Id, missionAgentId?: Id | null) =>
+  mayDecide(s, missionId, personId, missionAgentId)
+export const canSteer = (s: State, personId: Id, missionId: Id) => maySteer(s, missionId, personId)
 
 /** Route for a mission row: picking results → review, merged → summary, otherwise the thread. */
 export function missionRoute(

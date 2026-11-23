@@ -47,18 +47,24 @@ impl Rpc {
             p.insert(id, tx);
         }
         let msg = json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params});
-        self.out.send(msg.to_string()).map_err(|_| "agent stdin closed".to_string())?;
+        self.out
+            .send(msg.to_string())
+            .map_err(|_| "agent stdin closed".to_string())?;
         rx.await.map_err(|_| "agent exited".to_string())?
     }
 
     fn notify(&self, method: &str, params: Value) {
-        let _ = self.out.send(json!({"jsonrpc": "2.0", "method": method, "params": params}).to_string());
+        let _ = self
+            .out
+            .send(json!({"jsonrpc": "2.0", "method": method, "params": params}).to_string());
     }
 
     fn respond(&self, id: Value, result: Result<Value, (i64, String)>) {
         let msg = match result {
             Ok(r) => json!({"jsonrpc": "2.0", "id": id, "result": r}),
-            Err((code, message)) => json!({"jsonrpc": "2.0", "id": id, "error": {"code": code, "message": message}}),
+            Err((code, message)) => {
+                json!({"jsonrpc": "2.0", "id": id, "error": {"code": code, "message": message}})
+            }
         };
         let _ = self.out.send(msg.to_string());
     }
@@ -92,8 +98,16 @@ struct Shared {
 impl Shared {
     fn log(&self, verb: &str, target: &str) {
         let key = (verb.to_string(), target.to_string());
-        if self.logged.lock().map(|mut l| l.insert(key)).unwrap_or(true) {
-            let _ = self.events.send(AgentEvent::Log(LogLine { verb: verb.into(), target: target.into() }));
+        if self
+            .logged
+            .lock()
+            .map(|mut l| l.insert(key))
+            .unwrap_or(true)
+        {
+            let _ = self.events.send(AgentEvent::Log(LogLine {
+                verb: verb.into(),
+                target: target.into(),
+            }));
         }
     }
 
@@ -104,7 +118,8 @@ impl Shared {
 
 impl AgentAdapter for AcpAdapter {
     fn start(&self, ctx: AgentContext) -> Result<AgentSession, AdapterError> {
-        let workspace = Workspace::new(&ctx.worktree).map_err(|e| AdapterError::Other(format!("worktree: {e}")))?;
+        let workspace = Workspace::new(&ctx.worktree)
+            .map_err(|e| AdapterError::Other(format!("worktree: {e}")))?;
         let mut proc = Supervised::spawn(&self.command, &self.args, workspace.root())
             .map_err(|e| AdapterError::Spawn(self.command.clone(), e.to_string()))?;
         let (ctl_tx, ctl_rx) = mpsc::unbounded_channel();
@@ -123,7 +138,9 @@ impl AgentAdapter for AcpAdapter {
         tokio::spawn(async move {
             while let Some(line) = out_rx.recv().await {
                 logs.push(format!("> {line}"));
-                if stdin.write_all(line.as_bytes()).await.is_err() || stdin.write_all(b"\n").await.is_err() {
+                if stdin.write_all(line.as_bytes()).await.is_err()
+                    || stdin.write_all(b"\n").await.is_err()
+                {
                     break;
                 }
                 let _ = stdin.flush().await;
@@ -133,7 +150,11 @@ impl AgentAdapter for AcpAdapter {
         let shared = Arc::new(Shared {
             ctx,
             workspace,
-            rpc: Rpc { out: out_tx, pending: Mutex::new(HashMap::new()), next: AtomicU64::new(0) },
+            rpc: Rpc {
+                out: out_tx,
+                pending: Mutex::new(HashMap::new()),
+                next: AtomicU64::new(0),
+            },
             events: ev_tx,
             terminals: Mutex::new(HashMap::new()),
             next_terminal: AtomicU64::new(1),
@@ -151,19 +172,27 @@ impl AgentAdapter for AcpAdapter {
                     continue;
                 }
                 reader_shared.ctx.logs.push(format!("< {line}"));
-                let Ok(msg) = serde_json::from_str::<Value>(line) else { continue };
+                let Ok(msg) = serde_json::from_str::<Value>(line) else {
+                    continue;
+                };
                 handle_incoming(&reader_shared, msg);
             }
             reader_shared.rpc.fail_all();
         });
 
         tokio::spawn(drive(shared, proc, ctl_rx, reader));
-        Ok(AgentSession { control: ctl_tx, events: ev_rx })
+        Ok(AgentSession {
+            control: ctl_tx,
+            events: ev_rx,
+        })
     }
 }
 
 fn handle_incoming(shared: &Arc<Shared>, msg: Value) {
-    let method = msg.get("method").and_then(Value::as_str).map(str::to_string);
+    let method = msg
+        .get("method")
+        .and_then(Value::as_str)
+        .map(str::to_string);
     let id = msg.get("id").cloned();
     match (method, id) {
         (Some(method), Some(id)) => {
@@ -181,7 +210,12 @@ fn handle_incoming(shared: &Arc<Shared>, msg: Value) {
         }
         (None, Some(id)) => {
             let Some(id) = id.as_u64() else { return };
-            let tx = shared.rpc.pending.lock().ok().and_then(|mut p| p.remove(&id));
+            let tx = shared
+                .rpc
+                .pending
+                .lock()
+                .ok()
+                .and_then(|mut p| p.remove(&id));
             if let Some(tx) = tx {
                 let r = match msg.get("error") {
                     Some(e) => Err(e["message"].as_str().unwrap_or("error").to_string()),
@@ -197,10 +231,10 @@ fn handle_incoming(shared: &Arc<Shared>, msg: Value) {
 fn handle_update(shared: &Shared, update: &Value) {
     match update["sessionUpdate"].as_str().unwrap_or_default() {
         "agent_message_chunk" => {
-            if update["content"]["type"] == "text" {
-                if let Some(t) = update["content"]["text"].as_str() {
-                    let _ = shared.events.send(AgentEvent::Text(t.to_string()));
-                }
+            if update["content"]["type"] == "text"
+                && let Some(t) = update["content"]["text"].as_str()
+            {
+                let _ = shared.events.send(AgentEvent::Text(t.to_string()));
             }
         }
         "plan" => {
@@ -246,7 +280,12 @@ fn handle_update(shared: &Shared, update: &Value) {
 fn raw_command(raw: &Value) -> Option<String> {
     match &raw["command"] {
         Value::String(s) => Some(s.clone()),
-        Value::Array(a) => Some(a.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(" ")),
+        Value::Array(a) => Some(
+            a.iter()
+                .filter_map(Value::as_str)
+                .collect::<Vec<_>>()
+                .join(" "),
+        ),
         _ => None,
     }
 }
@@ -261,15 +300,31 @@ async fn handle_request(s: &Arc<Shared>, method: &str, p: Value) -> RpcResult {
     match method {
         "session/request_permission" => {
             let tool = &p["toolCall"];
-            let command = if tool["kind"] == "execute" { raw_command(&tool["rawInput"]) } else { None };
+            let command = if tool["kind"] == "execute" {
+                raw_command(&tool["rawInput"])
+            } else {
+                None
+            };
             let cwd = tool["rawInput"]["cwd"].as_str().map(PathBuf::from);
-            let title = tool["title"].as_str().unwrap_or("The agent asks for permission").to_string();
+            let title = tool["title"]
+                .as_str()
+                .unwrap_or("The agent asks for permission")
+                .to_string();
             let needs = match &command {
-                Some(_) => command_needs_approval(s.ctx.command_policy, cwd.as_deref(), s.workspace.root()),
+                Some(_) => {
+                    command_needs_approval(s.ctx.command_policy, cwd.as_deref(), s.workspace.root())
+                }
                 None => s.ctx.command_policy != astra_protocol::CommandPolicy::Auto,
             };
             let allowed = if needs {
-                s.ctx.approver.request(PermissionRequest { prompt: title, command: command.clone(), cwd }).await
+                s.ctx
+                    .approver
+                    .request(PermissionRequest {
+                        prompt: title,
+                        command: command.clone(),
+                        cwd,
+                    })
+                    .await
             } else {
                 true
             };
@@ -278,9 +333,18 @@ async fn handle_request(s: &Arc<Shared>, method: &str, p: Value) -> RpcResult {
             }
             let options = p["options"].as_array().cloned().unwrap_or_default();
             let pick = |kinds: &[&str]| {
-                kinds.iter().find_map(|k| options.iter().find(|o| o["kind"] == *k).and_then(|o| o["optionId"].as_str()))
+                kinds.iter().find_map(|k| {
+                    options
+                        .iter()
+                        .find(|o| o["kind"] == *k)
+                        .and_then(|o| o["optionId"].as_str())
+                })
             };
-            let choice = if allowed { pick(&["allow_once", "allow_always"]) } else { pick(&["reject_once", "reject_always"]) };
+            let choice = if allowed {
+                pick(&["allow_once", "allow_always"])
+            } else {
+                pick(&["reject_once", "reject_always"])
+            };
             Ok(match choice {
                 Some(id) => json!({"outcome": {"outcome": "selected", "optionId": id}}),
                 None => json!({"outcome": {"outcome": "cancelled"}}),
@@ -289,10 +353,17 @@ async fn handle_request(s: &Arc<Shared>, method: &str, p: Value) -> RpcResult {
         "fs/read_text_file" => {
             let path = p["path"].as_str().ok_or_else(|| invalid("path required"))?;
             let full = s.workspace.resolve(path).map_err(invalid)?;
-            let text = tokio::fs::read_to_string(&full).await.map_err(|e| (-32000, format!("{path}: {e}")))?;
+            let text = tokio::fs::read_to_string(&full)
+                .await
+                .map_err(|e| (-32000, format!("{path}: {e}")))?;
             let line = p["line"].as_u64().unwrap_or(1).max(1) as usize;
             let content = match p["limit"].as_u64() {
-                Some(limit) => text.lines().skip(line - 1).take(limit as usize).collect::<Vec<_>>().join("\n"),
+                Some(limit) => text
+                    .lines()
+                    .skip(line - 1)
+                    .take(limit as usize)
+                    .collect::<Vec<_>>()
+                    .join("\n"),
                 None if line > 1 => text.lines().skip(line - 1).collect::<Vec<_>>().join("\n"),
                 None => text,
             };
@@ -301,12 +372,18 @@ async fn handle_request(s: &Arc<Shared>, method: &str, p: Value) -> RpcResult {
         }
         "fs/write_text_file" => {
             let path = p["path"].as_str().ok_or_else(|| invalid("path required"))?;
-            let content = p["content"].as_str().ok_or_else(|| invalid("content required"))?;
+            let content = p["content"]
+                .as_str()
+                .ok_or_else(|| invalid("content required"))?;
             let full = s.workspace.resolve(path).map_err(invalid)?;
             if let Some(dir) = full.parent() {
-                tokio::fs::create_dir_all(dir).await.map_err(|e| (-32000, e.to_string()))?;
+                tokio::fs::create_dir_all(dir)
+                    .await
+                    .map_err(|e| (-32000, e.to_string()))?;
             }
-            tokio::fs::write(&full, content).await.map_err(|e| (-32000, format!("{path}: {e}")))?;
+            tokio::fs::write(&full, content)
+                .await
+                .map_err(|e| (-32000, format!("{path}: {e}")))?;
             s.log("edit", &s.rel(&full));
             Ok(Value::Null)
         }
@@ -329,18 +406,23 @@ async fn handle_request(s: &Arc<Shared>, method: &str, p: Value) -> RpcResult {
             }
         }
         "terminal/kill" | "terminal/release" => {
-            let id = p["terminalId"].as_str().ok_or_else(|| invalid("terminalId required"))?;
-            let mut terms = s.terminals.lock().map_err(|_| (-32603, "poisoned".to_string()))?;
+            let id = p["terminalId"]
+                .as_str()
+                .ok_or_else(|| invalid("terminalId required"))?;
+            let mut terms = s
+                .terminals
+                .lock()
+                .map_err(|_| (-32603, "poisoned".to_string()))?;
             if method == "terminal/release" {
-                if let Some(mut t) = terms.remove(id) {
-                    if let Some(k) = t.kill.take() {
-                        let _ = k.send(());
-                    }
-                }
-            } else if let Some(t) = terms.get_mut(id) {
-                if let Some(k) = t.kill.take() {
+                if let Some(mut t) = terms.remove(id)
+                    && let Some(k) = t.kill.take()
+                {
                     let _ = k.send(());
                 }
+            } else if let Some(t) = terms.get_mut(id)
+                && let Some(k) = t.kill.take()
+            {
+                let _ = k.send(());
             }
             Ok(Value::Null)
         }
@@ -351,29 +433,57 @@ async fn handle_request(s: &Arc<Shared>, method: &str, p: Value) -> RpcResult {
 type TerminalParts = (Arc<Mutex<(String, bool)>>, watch::Receiver<Option<Value>>);
 
 fn terminal_parts(s: &Shared, p: &Value) -> Result<TerminalParts, (i64, String)> {
-    let id = p["terminalId"].as_str().ok_or_else(|| invalid("terminalId required"))?;
-    let terms = s.terminals.lock().map_err(|_| (-32603, "poisoned".to_string()))?;
-    let t = terms.get(id).ok_or_else(|| invalid(format!("unknown terminal {id}")))?;
+    let id = p["terminalId"]
+        .as_str()
+        .ok_or_else(|| invalid("terminalId required"))?;
+    let terms = s
+        .terminals
+        .lock()
+        .map_err(|_| (-32603, "poisoned".to_string()))?;
+    let t = terms
+        .get(id)
+        .ok_or_else(|| invalid(format!("unknown terminal {id}")))?;
     Ok((t.output.clone(), t.exit.clone()))
 }
 
 async fn create_terminal(s: &Arc<Shared>, p: &Value) -> RpcResult {
-    let command = p["command"].as_str().ok_or_else(|| invalid("command required"))?.to_string();
-    let args: Vec<String> =
-        p["args"].as_array().map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect()).unwrap_or_default();
+    let command = p["command"]
+        .as_str()
+        .ok_or_else(|| invalid("command required"))?
+        .to_string();
+    let args: Vec<String> = p["args"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default();
     let cwd = match p["cwd"].as_str() {
         Some(c) => PathBuf::from(c),
         None => s.workspace.root().to_path_buf(),
     };
-    let line = if args.is_empty() { command.clone() } else { format!("{command} {}", args.join(" ")) };
+    let line = if args.is_empty() {
+        command.clone()
+    } else {
+        format!("{command} {}", args.join(" "))
+    };
     if command_needs_approval(s.ctx.command_policy, Some(&cwd), s.workspace.root()) {
-        let pre = s.pre_approved.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1)).is_ok();
+        let pre = s
+            .pre_approved
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
+            .is_ok();
         let inside = crate::policy::within(&cwd, s.workspace.root());
         // A prior approval only covers commands inside the worktree.
         let allowed = (pre && inside)
             || s.ctx
                 .approver
-                .request(PermissionRequest { prompt: format!("Run `{line}`"), command: Some(line.clone()), cwd: Some(cwd.clone()) })
+                .request(PermissionRequest {
+                    prompt: format!("Run `{line}`"),
+                    command: Some(line.clone()),
+                    cwd: Some(cwd.clone()),
+                })
                 .await;
         if !allowed {
             return Err((-32000, "the user denied running this command".into()));
@@ -387,14 +497,26 @@ async fn create_terminal(s: &Arc<Shared>, p: &Value) -> RpcResult {
     } else {
         (command.clone(), args)
     };
-    let mut proc = Supervised::spawn(&program, &argv, &cwd).map_err(|e| (-32000, format!("spawn {program}: {e}")))?;
+    let mut proc = Supervised::spawn(&program, &argv, &cwd)
+        .map_err(|e| (-32000, format!("spawn {program}: {e}")))?;
     drop(proc.child.stdin.take());
-    let limit = p["outputByteLimit"].as_u64().map(|l| l as usize).unwrap_or(TERMINAL_OUTPUT_LIMIT);
+    let limit = p["outputByteLimit"]
+        .as_u64()
+        .map(|l| l as usize)
+        .unwrap_or(TERMINAL_OUTPUT_LIMIT);
     let output = Arc::new(Mutex::new((String::new(), false)));
-    for reader in [proc.child.stdout.take().map(|o| Box::new(o) as Box<dyn tokio::io::AsyncRead + Unpin + Send>),
-                   proc.child.stderr.take().map(|e| Box::new(e) as Box<dyn tokio::io::AsyncRead + Unpin + Send>)]
-        .into_iter()
-        .flatten()
+    for reader in [
+        proc.child
+            .stdout
+            .take()
+            .map(|o| Box::new(o) as Box<dyn tokio::io::AsyncRead + Unpin + Send>),
+        proc.child
+            .stderr
+            .take()
+            .map(|e| Box::new(e) as Box<dyn tokio::io::AsyncRead + Unpin + Send>),
+    ]
+    .into_iter()
+    .flatten()
     {
         let output = output.clone();
         tokio::spawn(async move {
@@ -437,7 +559,14 @@ async fn create_terminal(s: &Arc<Shared>, p: &Value) -> RpcResult {
     });
     let id = format!("term-{}", s.next_terminal.fetch_add(1, Ordering::Relaxed));
     if let Ok(mut t) = s.terminals.lock() {
-        t.insert(id.clone(), Terminal { output, exit: exit_rx, kill: Some(kill_tx) });
+        t.insert(
+            id.clone(),
+            Terminal {
+                output,
+                exit: exit_rx,
+                kill: Some(kill_tx),
+            },
+        );
     }
     s.log("run", &line);
     Ok(json!({"terminalId": id}))
@@ -521,7 +650,7 @@ async fn drive(
                 let _ = s.events.send(AgentEvent::TurnDone);
             }
             if !queued.is_empty() {
-                prompt = Some(queued.drain(..).collect::<Vec<_>>().join("\n\n"));
+                prompt = Some(std::mem::take(&mut queued).join("\n\n"));
             }
         }
     }

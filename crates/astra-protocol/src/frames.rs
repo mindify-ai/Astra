@@ -10,7 +10,12 @@ use crate::ops::Op;
 #[serde(tag = "t", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum ClientFrame {
     /// First frame: identify and ask for every op after `cursor`.
-    Hello { workspace_id: String, node_id: String, cursor: u64, token: Option<String> },
+    Hello {
+        workspace_id: String,
+        node_id: String,
+        cursor: u64,
+        token: Option<String>,
+    },
     /// Ops created locally.
     Push { ops: Vec<Op> },
     /// This connection's current presence entries (replaces earlier ones).

@@ -84,3 +84,18 @@ jobs:
       - run: terraform init -backend=false -input=false
       - run: terraform validate
       - run: terraform test
+
+  e2e:
+    name: End to end (browser → relay → runner → git)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm add -w -D playwright@1.65.1 && npx playwright install --with-deps chromium
+      - run: git config --global user.name ci && git config --global user.email ci@example.com
+      - run: pnpm e2e

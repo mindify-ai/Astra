@@ -36,7 +36,10 @@ impl RouterConfig {
         RouterConfig {
             policy,
             anthropic,
-            local_candidates: LOCAL_CANDIDATES.iter().map(|(k, b)| (k.to_string(), b.to_string())).collect(),
+            local_candidates: LOCAL_CANDIDATES
+                .iter()
+                .map(|(k, b)| (k.to_string(), b.to_string()))
+                .collect(),
             local_model: None,
             probe_timeout: Duration::from_millis(400),
         }
@@ -57,13 +60,24 @@ impl Router {
 
     /// Whether the cloud API answers at all (any HTTP status counts as reachable).
     pub async fn cloud_reachable(&self) -> bool {
-        let Some(cfg) = &self.config.anthropic else { return false };
-        let Ok(http) = reqwest::Client::builder().timeout(Duration::from_secs(3)).build() else { return false };
-        http.get(format!("{}/v1/models", cfg.base_url.trim_end_matches('/'))).send().await.is_ok()
+        let Some(cfg) = &self.config.anthropic else {
+            return false;
+        };
+        let Ok(http) = reqwest::Client::builder()
+            .timeout(Duration::from_secs(3))
+            .build()
+        else {
+            return false;
+        };
+        http.get(format!("{}/v1/models", cfg.base_url.trim_end_matches('/')))
+            .send()
+            .await
+            .is_ok()
     }
 
     async fn local(&self) -> Result<Arc<dyn Provider>> {
-        let servers = detect_servers(&self.config.local_candidates, self.config.probe_timeout).await;
+        let servers =
+            detect_servers(&self.config.local_candidates, self.config.probe_timeout).await;
         for s in servers {
             let model = match &self.config.local_model {
                 Some(m) => m.clone(),
@@ -72,15 +86,21 @@ impl Router {
                     None => continue,
                 },
             };
-            return Ok(Arc::new(OpenAiCompatProvider::new(s.kind, s.base_url, model)?));
+            return Ok(Arc::new(OpenAiCompatProvider::new(
+                s.kind, s.base_url, model,
+            )?));
         }
-        Err(LlmError::NoProvider("no local model server detected (Ollama, LM Studio, llama.cpp)".into()))
+        Err(LlmError::NoProvider(
+            "no local model server detected (Ollama, LM Studio, llama.cpp)".into(),
+        ))
     }
 
     fn cloud(&self) -> Result<Arc<dyn Provider>> {
         match &self.config.anthropic {
             Some(cfg) => Ok(Arc::new(AnthropicProvider::new(cfg.clone())?)),
-            None => Err(LlmError::NoProvider("no Anthropic API key configured".into())),
+            None => Err(LlmError::NoProvider(
+                "no Anthropic API key configured".into(),
+            )),
         }
     }
 

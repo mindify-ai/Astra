@@ -39,7 +39,9 @@ pub struct StoreHost {
 
 impl StoreHost {
     fn lock(&self) -> Result<std::sync::MutexGuard<'_, Store>> {
-        self.store.lock().map_err(|_| SyncError::Storage("store lock poisoned".into()))
+        self.store
+            .lock()
+            .map_err(|_| SyncError::Storage("store lock poisoned".into()))
     }
 }
 
@@ -81,7 +83,11 @@ pub struct ClientCore {
 
 impl ClientCore {
     /// A client for `workspace_id` identifying as `node_id`.
-    pub fn new(workspace_id: impl Into<String>, node_id: impl Into<String>, token: Option<String>) -> Self {
+    pub fn new(
+        workspace_id: impl Into<String>,
+        node_id: impl Into<String>,
+        token: Option<String>,
+    ) -> Self {
         ClientCore {
             workspace_id: workspace_id.into(),
             node_id: node_id.into(),
@@ -116,7 +122,11 @@ impl ClientCore {
     }
 
     /// Handle a server frame; returns frames to send.
-    pub fn on_frame(&mut self, host: &dyn SyncHost, frame: ServerFrame) -> Result<Vec<ClientFrame>> {
+    pub fn on_frame(
+        &mut self,
+        host: &dyn SyncHost,
+        frame: ServerFrame,
+    ) -> Result<Vec<ClientFrame>> {
         match frame {
             ServerFrame::Welcome { .. } => {
                 if self.phase != Phase::AwaitWelcome {
@@ -125,7 +135,9 @@ impl ClientCore {
                 self.phase = Phase::Live;
                 let mut out = self.push_pending(host)?;
                 if let Some(p) = &self.presence {
-                    out.push(ClientFrame::Presence { presence: p.clone() });
+                    out.push(ClientFrame::Presence {
+                        presence: p.clone(),
+                    });
                 }
                 Ok(out)
             }
@@ -162,18 +174,27 @@ impl ClientCore {
     /// Local presence changed; returns a `presence` frame when live (otherwise sent after `welcome`).
     pub fn on_presence(&mut self, presence: Vec<Presence>) -> Vec<ClientFrame> {
         self.presence = Some(presence.clone());
-        if self.phase == Phase::Live { vec![ClientFrame::Presence { presence }] } else { vec![] }
+        if self.phase == Phase::Live {
+            vec![ClientFrame::Presence { presence }]
+        } else {
+            vec![]
+        }
     }
 
     fn push_pending(&mut self, host: &dyn SyncHost) -> Result<Vec<ClientFrame>> {
-        let pending: Vec<Op> =
-            host.pending()?.into_iter().filter(|op| !self.in_flight.contains(&op.id)).collect();
+        let pending: Vec<Op> = host
+            .pending()?
+            .into_iter()
+            .filter(|op| !self.in_flight.contains(&op.id))
+            .collect();
         let mut out = Vec::new();
         for chunk in pending.chunks(PUSH_BATCH) {
             for op in chunk {
                 self.in_flight.insert(op.id.clone());
             }
-            out.push(ClientFrame::Push { ops: chunk.to_vec() });
+            out.push(ClientFrame::Push {
+                ops: chunk.to_vec(),
+            });
         }
         Ok(out)
     }
@@ -203,7 +224,11 @@ pub struct SyncConfig {
 
 impl SyncConfig {
     /// Defaults: 250 ms → 30 s exponential backoff.
-    pub fn new(workspace_id: impl Into<String>, node_id: impl Into<String>, token: Option<String>) -> Self {
+    pub fn new(
+        workspace_id: impl Into<String>,
+        node_id: impl Into<String>,
+        token: Option<String>,
+    ) -> Self {
         SyncConfig {
             workspace_id: workspace_id.into(),
             node_id: node_id.into(),
@@ -258,8 +283,20 @@ impl SyncClient {
     /// A client and its control handle.
     pub fn new(config: SyncConfig, host: Arc<dyn SyncHost>) -> (SyncClient, SyncHandle) {
         let (tx, rx) = mpsc::unbounded_channel();
-        let core = ClientCore::new(config.workspace_id.clone(), config.node_id.clone(), config.token.clone());
-        (SyncClient { config, host, core, rx }, SyncHandle { tx })
+        let core = ClientCore::new(
+            config.workspace_id.clone(),
+            config.node_id.clone(),
+            config.token.clone(),
+        );
+        (
+            SyncClient {
+                config,
+                host,
+                core,
+                rx,
+            },
+            SyncHandle { tx },
+        )
     }
 
     /// Run until [`SyncHandle::shutdown`] (or every handle is dropped).
@@ -275,7 +312,7 @@ impl SyncClient {
                         }
                     }
                 },
-                Err(e) => tracing::debug!(error = %e, "sync connect failed"),
+                Err(e) => tracing::warn!(error = %e, "sync connect failed; retrying"),
             }
             self.core.on_disconnected();
             self.host.connectivity(false);

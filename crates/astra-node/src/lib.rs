@@ -17,8 +17,10 @@ use astra_sync::{SyncClient, SyncConfig, SyncHandle, SyncHost};
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
 
+pub mod noise;
 mod ws;
 
+pub use noise::NoiseWsConnector;
 pub use ws::WsConnector;
 
 #[cfg(feature = "runtime")]
@@ -62,9 +64,6 @@ pub struct NodeConfig {
     pub relay: Option<RelayConfig>,
     /// Load this seed document when the store is empty.
     pub seed_if_empty: Option<PathBuf>,
-    /// Secrets for agents; default: OS keychain (feature `keyring`) or memory, with env fallback.
-    #[cfg(feature = "runtime")]
-    pub secrets: Option<Arc<dyn astra_runtime::SecretStore>>,
 }
 
 impl NodeConfig {
@@ -83,22 +82,27 @@ impl NodeConfig {
             runtime: false,
             relay: None,
             seed_if_empty: None,
-            #[cfg(feature = "runtime")]
-            secrets: None,
         }
     }
 }
 
-/// Events for local clients (Tauri: `astra://ops`, `astra://presence`, `astra://connectivity`).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "camelCase")]
+/// Relay connectivity (`astra://connectivity` payload: `{online, relay}`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Connectivity {
+    pub online: bool,
+    pub relay: RelayStatus,
+}
+
+/// Events for local clients (Tauri: `astra://ops` `{ops, cursor}`, `astra://presence` `Presence[]`,
+/// `astra://connectivity` `{online, relay}`).
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NodeEvent {
     /// New ops (local or remote), in log order; `cursor` is the node's local sequence after them.
     Ops { ops: Vec<Op>, cursor: u64 },
     /// Everyone's presence.
-    Presence { presence: Vec<Presence> },
+    Presence(Vec<Presence>),
     /// Relay connectivity.
-    Connectivity { online: bool, relay: RelayStatus },
+    Connectivity(Connectivity),
 }
 
 struct Inner {
@@ -110,7 +114,7 @@ struct Inner {
     /// Presence by source (`local`, `lan:<id>`, ...).
     presence: Mutex<BTreeMap<String, Vec<Presence>>>,
     remote_presence: Mutex<Option<Vec<Presence>>>,
-    connectivity: Mutex<(bool, RelayStatus)>,
+    connectivity: Mutex<Connectivity>,
     #[cfg(feature = "runtime")]
     orchestrator: Mutex<Option<astra_runtime::Orchestrator>>,
 }
@@ -128,23 +132,57 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 
 impl Node {
     /// Open (or create) the node in `config.data_dir`. Must be called inside a tokio runtime.
+    ///
+    /// Runner nodes keep agent secrets in the OS keychain (feature `keyring`), else in memory; both fall back
+    /// to environment variables. Use [`Node::open_with_secrets`] to supply a store.
     pub async fn open(config: NodeConfig) -> Result<Node> {
+        Self::open_inner(
+            config,
+            #[cfg(feature = "runtime")]
+            None,
+        )
+        .await
+    }
+
+    /// [`Node::open`] with an explicit secret store for agents.
+    #[cfg(feature = "runtime")]
+    pub async fn open_with_secrets(
+        config: NodeConfig,
+        secrets: Arc<dyn astra_runtime::SecretStore>,
+    ) -> Result<Node> {
+        Self::open_inner(config, Some(secrets)).await
+    }
+
+    async fn open_inner(
+        config: NodeConfig,
+        #[cfg(feature = "runtime")] secrets: Option<Arc<dyn astra_runtime::SecretStore>>,
+    ) -> Result<Node> {
         std::fs::create_dir_all(&config.data_dir)?;
         let mut store = Store::open(config.data_dir.join("astra.db"))?;
-        if let Some(seed_path) = &config.seed_if_empty {
-            if store.op_count()? == 0 && store.state().is_empty() {
-                let text = std::fs::read_to_string(seed_path)?;
-                let seed: Seed = serde_json::from_str(&text).map_err(|e| NodeError::Seed(e.to_string()))?;
-                store.seed(&seed)?;
-            }
+        if let Some(seed_path) = &config.seed_if_empty
+            && store.op_count()? == 0
+            && store.state().is_empty()
+        {
+            let text = std::fs::read_to_string(seed_path)?;
+            let seed: Seed =
+                serde_json::from_str(&text).map_err(|e| NodeError::Seed(e.to_string()))?;
+            store.seed(&seed)?;
         }
         store.set_identity(&config.workspace_id, &config.me)?;
         let mut clock = HlcClock::new(config.node_id.clone());
-        if let Some((_, op)) = store.ops_since(store.head_seq()?.saturating_sub(1), 1)?.into_iter().next() {
+        if let Some((_, op)) = store
+            .ops_since(store.head_seq()?.saturating_sub(1), 1)?
+            .into_iter()
+            .next()
+        {
             clock.observe(&op.hlc);
         }
         let (events, _) = broadcast::channel(1024);
-        let relay_status = if config.relay.is_some() { RelayStatus::Disconnected } else { RelayStatus::Disabled };
+        let relay_status = if config.relay.is_some() {
+            RelayStatus::Disconnected
+        } else {
+            RelayStatus::Disabled
+        };
         let inner = Arc::new(Inner {
             config: config.clone(),
             store: Mutex::new(store),
@@ -153,7 +191,10 @@ impl Node {
             sync: Mutex::new(None),
             presence: Mutex::new(BTreeMap::new()),
             remote_presence: Mutex::new(None),
-            connectivity: Mutex::new((false, relay_status)),
+            connectivity: Mutex::new(Connectivity {
+                online: false,
+                relay: relay_status,
+            }),
             #[cfg(feature = "runtime")]
             orchestrator: Mutex::new(None),
         });
@@ -161,15 +202,21 @@ impl Node {
 
         if config.runtime {
             #[cfg(feature = "runtime")]
-            node.start_runtime()?;
+            node.start_runtime(secrets)?;
             #[cfg(not(feature = "runtime"))]
-            return Err(NodeError::Other("this build has no agent runtime (feature `runtime`)".into()));
+            return Err(NodeError::Other(
+                "this build has no agent runtime (feature `runtime`)".into(),
+            ));
         }
 
         if let Some(relay) = &config.relay {
             let host: Arc<dyn SyncHost> = Arc::new(NodeSyncHost { node: node.clone() });
             let (client, handle) = SyncClient::new(
-                SyncConfig::new(config.workspace_id.clone(), config.node_id.clone(), Some(relay.token.clone())),
+                SyncConfig::new(
+                    config.workspace_id.clone(),
+                    config.node_id.clone(),
+                    Some(relay.token.clone()),
+                ),
                 host,
             );
             *lock(&node.inner.sync) = Some(handle);
@@ -179,14 +226,16 @@ impl Node {
     }
 
     #[cfg(feature = "runtime")]
-    fn start_runtime(&self) -> Result<()> {
+    fn start_runtime(&self, secrets: Option<Arc<dyn astra_runtime::SecretStore>>) -> Result<()> {
         use astra_runtime::secrets::{MemorySecrets, WithEnvFallback};
-        let secrets: Arc<dyn astra_runtime::SecretStore> = match &self.inner.config.secrets {
-            Some(s) => s.clone(),
+        let secrets: Arc<dyn astra_runtime::SecretStore> = match secrets {
+            Some(s) => s,
             None => {
                 #[cfg(feature = "keyring")]
                 {
-                    Arc::new(WithEnvFallback(astra_runtime::secrets::KeyringSecrets::new("ai.mindify.astra")))
+                    Arc::new(WithEnvFallback(
+                        astra_runtime::secrets::KeyringSecrets::new("ai.mindify.astra"),
+                    ))
                 }
                 #[cfg(not(feature = "keyring"))]
                 {
@@ -196,7 +245,9 @@ impl Node {
         };
         #[cfg(feature = "keyring")]
         let _ = MemorySecrets::new;
-        let host: Arc<dyn astra_runtime::NodeHost> = Arc::new(RuntimeHost { node: Arc::downgrade(&self.inner) });
+        let host: Arc<dyn astra_runtime::NodeHost> = Arc::new(RuntimeHost {
+            node: Arc::downgrade(&self.inner),
+        });
         let orch = astra_runtime::Orchestrator::start(
             host,
             astra_runtime::OrchestratorConfig::new(self.inner.config.data_dir.clone(), secrets),
@@ -220,7 +271,12 @@ impl Node {
     }
 
     /// State (with merged presence) and the local cursor.
-    pub fn snapshot(&self) -> Result<Snapshot> {
+    pub async fn snapshot(&self) -> Result<Snapshot> {
+        self.snapshot_now()
+    }
+
+    /// [`Node::snapshot`] without awaiting.
+    pub fn snapshot_now(&self) -> Result<Snapshot> {
         let (mut state, cursor) = {
             let store = lock(&self.inner.store);
             (store.state().clone(), store.head_seq()?)
@@ -234,8 +290,13 @@ impl Node {
         f(lock(&self.inner.store).state())
     }
 
+    /// Append ops made by local clients and sync them.
+    pub async fn apply(&self, ops: Vec<Op>) -> Result<()> {
+        self.apply_ops(ops).map(|_| ())
+    }
+
     /// Append ops made by local clients (or LAN peers) and sync them. Returns the ops that were new.
-    pub fn apply(&self, ops: Vec<Op>) -> Result<Vec<Op>> {
+    pub fn apply_ops(&self, ops: Vec<Op>) -> Result<Vec<Op>> {
         {
             let mut clock = lock(&self.inner.clock);
             for op in &ops {
@@ -243,10 +304,10 @@ impl Node {
             }
         }
         let fresh = self.append(&ops, Origin::Local)?;
-        if !fresh.is_empty() {
-            if let Some(h) = lock(&self.inner.sync).as_ref() {
-                h.notify_local();
-            }
+        if !fresh.is_empty()
+            && let Some(h) = lock(&self.inner.sync).as_ref()
+        {
+            h.notify_local();
         }
         Ok(fresh)
     }
@@ -264,7 +325,10 @@ impl Node {
             (fresh, store.head_seq()?)
         };
         if !fresh.is_empty() {
-            let _ = self.inner.events.send(NodeEvent::Ops { ops: fresh.clone(), cursor });
+            let _ = self.inner.events.send(NodeEvent::Ops {
+                ops: fresh.clone(),
+                cursor,
+            });
             #[cfg(feature = "runtime")]
             if let Some(orch) = lock(&self.inner.orchestrator).as_ref() {
                 for op in &fresh {
@@ -290,9 +354,10 @@ impl Node {
         self.inner.events.subscribe()
     }
 
-    /// Set this device's presence.
-    pub fn set_presence(&self, presence: Vec<Presence>) {
-        self.set_presence_for("local", presence);
+    /// Set (or clear, with `None`) this device's presence.
+    pub async fn set_presence(&self, presence: Option<Presence>) -> Result<()> {
+        self.set_presence_for("local", presence.into_iter().collect());
+        Ok(())
     }
 
     /// Set presence on behalf of a source (e.g. a LAN peer). Empty clears it.
@@ -305,16 +370,24 @@ impl Node {
                 p.insert(source.to_string(), presence);
             }
         }
-        let ours: Vec<Presence> = lock(&self.inner.presence).values().flatten().cloned().collect();
+        let ours: Vec<Presence> = lock(&self.inner.presence)
+            .values()
+            .flatten()
+            .cloned()
+            .collect();
         if let Some(h) = lock(&self.inner.sync).as_ref() {
             h.set_presence(ours);
         }
-        let _ = self.inner.events.send(NodeEvent::Presence { presence: self.presence() });
+        let _ = self.inner.events.send(NodeEvent::Presence(self.presence()));
     }
 
     /// Everyone's presence: the relay's view when connected, merged with this node's own sources.
     pub fn presence(&self) -> Vec<Presence> {
-        let ours: Vec<Presence> = lock(&self.inner.presence).values().flatten().cloned().collect();
+        let ours: Vec<Presence> = lock(&self.inner.presence)
+            .values()
+            .flatten()
+            .cloned()
+            .collect();
         match lock(&self.inner.remote_presence).as_ref() {
             Some(remote) => {
                 let mut all = remote.clone();
@@ -330,7 +403,7 @@ impl Node {
     }
 
     /// Current connectivity.
-    pub fn connectivity(&self) -> (bool, RelayStatus) {
+    pub fn connectivity(&self) -> Connectivity {
         *lock(&self.inner.connectivity)
     }
 
@@ -374,7 +447,9 @@ impl SyncHost for NodeSyncHost {
                 clock.observe(&op.hlc);
             }
         }
-        self.node.append(&ops, Origin::Remote).map_err(|e| astra_sync::SyncError::Storage(e.to_string()))?;
+        self.node
+            .append(&ops, Origin::Remote)
+            .map_err(|e| astra_sync::SyncError::Storage(e.to_string()))?;
         lock(&self.node.inner.store).set_cursor(cursor)?;
         Ok(())
     }
@@ -383,21 +458,33 @@ impl SyncHost for NodeSyncHost {
     }
     fn remote_presence(&self, presence: Vec<Presence>) {
         *lock(&self.node.inner.remote_presence) = Some(presence);
-        let _ = self.node.inner.events.send(NodeEvent::Presence { presence: self.node.presence() });
+        let _ = self
+            .node
+            .inner
+            .events
+            .send(NodeEvent::Presence(self.node.presence()));
     }
     fn connectivity(&self, online: bool) {
-        let status = if online { RelayStatus::Connected } else { RelayStatus::Disconnected };
+        let status = if online {
+            RelayStatus::Connected
+        } else {
+            RelayStatus::Disconnected
+        };
+        let next = Connectivity {
+            online,
+            relay: status,
+        };
         let changed = {
             let mut c = lock(&self.node.inner.connectivity);
-            let changed = *c != (online, status);
-            *c = (online, status);
+            let changed = *c != next;
+            *c = next;
             changed
         };
         if !online {
             *lock(&self.node.inner.remote_presence) = None;
         }
         if changed {
-            let _ = self.node.inner.events.send(NodeEvent::Connectivity { online, relay: status });
+            let _ = self.node.inner.events.send(NodeEvent::Connectivity(next));
         }
     }
 }
@@ -410,7 +497,10 @@ struct RuntimeHost {
 #[cfg(feature = "runtime")]
 impl astra_runtime::NodeHost for RuntimeHost {
     fn node_id(&self) -> String {
-        self.node.upgrade().map(|n| n.config.node_id.clone()).unwrap_or_default()
+        self.node
+            .upgrade()
+            .map(|n| n.config.node_id.clone())
+            .unwrap_or_default()
     }
     fn with_state(&self, f: &mut dyn FnMut(&State)) {
         match self.node.upgrade() {
@@ -422,11 +512,18 @@ impl astra_runtime::NodeHost for RuntimeHost {
         let inner = self.node.upgrade().ok_or("node closed")?;
         let node = Node { inner };
         let actor = node.inner.config.node_id.clone();
-        let ops: Vec<Op> = bodies.into_iter().map(|b| node.make_op(actor.clone(), b)).collect();
-        node.apply(ops.clone()).map_err(|e| e.to_string())?;
+        let ops: Vec<Op> = bodies
+            .into_iter()
+            .map(|b| node.make_op(actor.clone(), b))
+            .collect();
+        node.apply_ops(ops.clone()).map_err(|e| e.to_string())?;
         Ok(ops)
     }
     fn has_command_result(&self, command_op: &str) -> bool {
-        self.node.upgrade().is_some_and(|n| lock(&n.store).has_command_result(command_op).unwrap_or(false))
+        self.node.upgrade().is_some_and(|n| {
+            lock(&n.store)
+                .has_command_result(command_op)
+                .unwrap_or(false)
+        })
     }
 }

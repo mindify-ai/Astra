@@ -39,6 +39,7 @@ astra-sync = { path = "crates/astra-sync" }
 astra-llm = { path = "crates/astra-llm" }
 astra-runtime = { path = "crates/astra-runtime" }
 astra-node = { path = "crates/astra-node", default-features = false }
+astra-server = { path = "crates/astra-server" }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

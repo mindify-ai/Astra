@@ -30,8 +30,12 @@ impl Io {
         self.next_id += 1;
         self.send(json!({"jsonrpc":"2.0","id":id,"method":method,"params":params}));
         loop {
-            let Some(Ok(line)) = self.lines.next() else { std::process::exit(0) };
-            let Ok(msg) = serde_json::from_str::<Value>(&line) else { continue };
+            let Some(Ok(line)) = self.lines.next() else {
+                std::process::exit(0)
+            };
+            let Ok(msg) = serde_json::from_str::<Value>(&line) else {
+                continue;
+            };
             if msg["method"] == "session/cancel" {
                 std::process::exit(0);
             }
@@ -47,13 +51,19 @@ impl Io {
 
 fn main() {
     let stdin: &'static std::io::Stdin = Box::leak(Box::new(std::io::stdin()));
-    let mut io = Io { lines: stdin.lock().lines(), next_id: 100 };
+    let mut io = Io {
+        lines: stdin.lock().lines(),
+        next_id: 100,
+    };
     let file = std::env::var("FAKE_ACP_FILE").unwrap_or_else(|_| "hello.txt".into());
-    let content = std::env::var("FAKE_ACP_CONTENT").unwrap_or_else(|_| "hello from the fake agent\n".into());
+    let content =
+        std::env::var("FAKE_ACP_CONTENT").unwrap_or_else(|_| "hello from the fake agent\n".into());
     let mut cwd = String::new();
     let mut turns = 0;
     while let Some(Ok(line)) = io.lines.next() {
-        let Ok(msg) = serde_json::from_str::<Value>(&line) else { continue };
+        let Ok(msg) = serde_json::from_str::<Value>(&line) else {
+            continue;
+        };
         let id = msg["id"].clone();
         match msg["method"].as_str().unwrap_or_default() {
             "initialize" => io.send(json!({"jsonrpc":"2.0","id":id,"result":{
@@ -68,7 +78,10 @@ fn main() {
             "session/prompt" => {
                 turns += 1;
                 let s = "fake-1";
-                let text = msg["params"]["prompt"][0]["text"].as_str().unwrap_or_default().to_string();
+                let text = msg["params"]["prompt"][0]["text"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string();
                 if turns > 1 {
                     io.notify(s, json!({"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":format!("Got: {text}")}}));
                     io.send(json!({"jsonrpc":"2.0","id":id,"result":{"stopReason":"end_turn"}}));
@@ -83,12 +96,18 @@ fn main() {
                 let path = format!("{cwd}/{file}");
                 io.notify(s, json!({"sessionUpdate":"tool_call","toolCallId":"t1","title":format!("Write {file}"),
                     "kind":"edit","status":"pending","locations":[{"path":path}]}));
-                if let Err(e) = io.request("fs/write_text_file", json!({"sessionId":s,"path":path,"content":content})) {
+                if let Err(e) = io.request(
+                    "fs/write_text_file",
+                    json!({"sessionId":s,"path":path,"content":content}),
+                ) {
                     io.send(json!({"jsonrpc":"2.0","id":id,"error":{"code":-32000,"message":format!("write failed: {e}")}}));
                     continue;
                 }
                 // An escape attempt must be refused by the client.
-                let escaped = io.request("fs/write_text_file", json!({"sessionId":s,"path":format!("{cwd}/../escape.txt"),"content":"x"}));
+                let escaped = io.request(
+                    "fs/write_text_file",
+                    json!({"sessionId":s,"path":format!("{cwd}/../escape.txt"),"content":"x"}),
+                );
                 if escaped.is_ok() {
                     io.notify(s, json!({"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"ESCAPED "}}));
                 }
@@ -98,7 +117,10 @@ fn main() {
                     "options":[{"optionId":"allow","name":"Allow","kind":"allow_once"},{"optionId":"reject","name":"Reject","kind":"reject_once"}]}));
                 let allowed = matches!(&perm, Ok(r) if r["outcome"]["outcome"] == "selected" && r["outcome"]["optionId"] == "allow");
                 if allowed {
-                    let term = io.request("terminal/create", json!({"sessionId":s,"command":"sh","args":["-c",cmd],"cwd":cwd}));
+                    let term = io.request(
+                        "terminal/create",
+                        json!({"sessionId":s,"command":"sh","args":["-c",cmd],"cwd":cwd}),
+                    );
                     match term {
                         Ok(t) => {
                             let tid = t["terminalId"].clone();

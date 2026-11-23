@@ -2,18 +2,28 @@ import type { Entity, EntityKind, Op, State } from './types'
 import { collectionOf } from './types'
 
 /**
- * Per-field last-writer-wins reducer. Same rules as crates/astra-protocol (see
- * fixtures/ops-conformance.json): seeded entities carry clock "" (older than any op).
+ * Per-field last-writer-wins reducer. Rule for rule the same as crates/astra-protocol/src/reducer.rs
+ * (fixtures/ops-conformance.json runs against both):
+ * - seeded entities carry clock "" (older than any op);
+ * - put/patch set each field whose clock is older than the op; patches to never-seen entities are ignored;
+ * - a delete records a tombstone; an entity is visible iff it has no tombstone or its newest field clock is
+ *   newer than the tombstone. A deleted entity's data stays hidden, so ops that arrive later still update it
+ *   and a concurrent write newer than the delete revives it, whatever the arrival order.
  */
+export interface EntityClock {
+  fields: Record<string, string>
+  tombstone?: string
+  /** Last known data of a deleted (invisible) entity. */
+  hidden?: Record<string, unknown>
+}
+
 export interface Clocks {
-  /** `${kind}/${id}` → field → hlc */
-  fields: Map<string, Record<string, string>>
-  /** `${kind}/${id}` → hlc of the delete */
-  tombstones: Map<string, string>
+  /** `${kind}/${id}` → clock record */
+  entities: Map<string, EntityClock>
   applied: Set<string>
 }
 
-export const newClocks = (): Clocks => ({ fields: new Map(), tombstones: new Map(), applied: new Set() })
+export const newClocks = (): Clocks => ({ entities: new Map(), applied: new Set() })
 
 export function emptyState(workspaceId = '', me = ''): State {
   return {
@@ -50,6 +60,13 @@ export function insertEntities(state: State, entities: Entity[]): State {
   return next
 }
 
+const newest = (c: EntityClock): string => {
+  let n = ''
+  for (const v of Object.values(c.fields)) if (v > n) n = v
+  return n
+}
+const visible = (c: EntityClock): boolean => c.tombstone === undefined || newest(c) > c.tombstone
+
 /** Applies ops in the given order; copies each touched collection once. */
 export function applyOps(state: State, clocks: Clocks, ops: Op[]): State {
   const next: State = { ...state }
@@ -63,63 +80,70 @@ export function applyOps(state: State, clocks: Clocks, ops: Op[]): State {
     return (next as unknown as Record<string, AnyCollection>)[key] as AnyCollection
   }
 
+  const write = (
+    kind: EntityKind,
+    id: string,
+    hlc: string,
+    incoming: Record<string, unknown>,
+    isPut: boolean,
+  ) => {
+    const key = `${kind}/${id}`
+    const prev = clocks.entities.get(key)
+    const c = coll(kind)
+    const current = (c[id] as unknown as Record<string, unknown> | undefined) ?? prev?.hidden
+    if (!current && !isPut) return // patch to an entity never seen
+    const clock: EntityClock = {
+      fields: { ...(prev?.fields ?? {}) },
+      tombstone: prev?.tombstone,
+      hidden: prev?.hidden,
+    }
+    const data: Record<string, unknown> = { ...(current ?? {}) }
+    let changed = false
+    for (const [f, v] of Object.entries(incoming)) {
+      if (f === 'kind' || f === 'id') continue
+      if ((clock.fields[f] ?? '') < hlc) {
+        clock.fields[f] = hlc
+        data[f] = v
+        changed = true
+      }
+    }
+    if (!changed) return
+    data.kind = kind
+    data.id = id
+    if (visible(clock)) {
+      clock.hidden = undefined
+      c[id] = data as unknown as Entity
+    } else {
+      delete c[id]
+      clock.hidden = data
+    }
+    clocks.entities.set(key, clock)
+  }
+
   for (const op of ops) {
     if (clocks.applied.has(op.id)) continue
     clocks.applied.add(op.id)
     const body = op.body
     if (body.type === 'put') {
-      const { kind, id } = body.entity
-      const key = `${kind}/${id}`
-      const tomb = clocks.tombstones.get(key)
-      if (tomb !== undefined && tomb >= op.hlc) continue
-      const c = coll(kind)
-      const existing = c[id]
-      if (!existing) {
-        clocks.tombstones.delete(key)
-        c[id] = body.entity
-        clocks.fields.set(key, Object.fromEntries(Object.keys(body.entity).map((f) => [f, op.hlc])))
-        continue
-      }
-      const fc = clocks.fields.get(key) ?? {}
-      const merged: Record<string, unknown> = { ...existing }
-      for (const [f, v] of Object.entries(body.entity)) {
-        if (f === 'kind' || f === 'id') continue
-        if ((fc[f] ?? '') < op.hlc) {
-          merged[f] = v
-          fc[f] = op.hlc
-        }
-      }
-      clocks.fields.set(key, fc)
-      c[id] = merged as unknown as Entity
+      write(body.entity.kind, body.entity.id, op.hlc, body.entity as unknown as Record<string, unknown>, true)
     } else if (body.type === 'patch') {
-      const c = coll(body.entityKind)
-      const existing = c[body.id]
-      if (!existing) continue
-      const key = `${body.entityKind}/${body.id}`
-      const fc = clocks.fields.get(key) ?? {}
-      const merged: Record<string, unknown> = { ...existing }
-      let changed = false
-      for (const [f, v] of Object.entries(body.fields)) {
-        if (f === 'kind' || f === 'id') continue
-        if ((fc[f] ?? '') < op.hlc) {
-          merged[f] = v
-          fc[f] = op.hlc
-          changed = true
-        }
-      }
-      clocks.fields.set(key, fc)
-      if (changed) c[body.id] = merged as unknown as Entity
+      write(body.entityKind, body.id, op.hlc, body.fields, false)
     } else if (body.type === 'delete') {
       const key = `${body.entityKind}/${body.id}`
+      const prev = clocks.entities.get(key)
+      if (prev?.tombstone !== undefined && prev.tombstone >= op.hlc) continue
+      const clock: EntityClock = {
+        fields: { ...(prev?.fields ?? {}) },
+        tombstone: op.hlc,
+        hidden: prev?.hidden,
+      }
       const c = coll(body.entityKind)
-      const fc = clocks.fields.get(key) ?? {}
-      // biome-ignore lint/complexity/useMathMinMax: HLCs are strings compared lexicographically
-      const newest = Object.values(fc).reduce((a, b) => (a > b ? a : b), '')
-      if (c[body.id] && newest >= op.hlc) continue
-      delete c[body.id]
-      clocks.fields.delete(key)
-      const prev = clocks.tombstones.get(key)
-      if (prev === undefined || prev < op.hlc) clocks.tombstones.set(key, op.hlc)
+      const existing = c[body.id]
+      if (!visible(clock) && existing) {
+        clock.hidden = existing as unknown as Record<string, unknown>
+        delete c[body.id]
+      }
+      clocks.entities.set(key, clock)
     }
     // command / commandResult do not change entity state.
   }

@@ -99,15 +99,22 @@ pub trait AgentAdapter: Send + Sync {
 /// The adapter implementation for a protocol `Adapter` config.
 pub fn for_config(adapter: &Adapter) -> Box<dyn AgentAdapter> {
     match adapter {
-        Adapter::Acp { command, args } => Box::new(acp::AcpAdapter { command: command.clone(), args: args.clone() }),
-        Adapter::Command { command, args } => {
-            Box::new(command::CommandAdapter { command: command.clone(), args: args.clone() })
-        }
-        Adapter::Langgraph { endpoint, graph } => {
-            Box::new(langgraph::LangGraphAdapter { endpoint: endpoint.clone(), graph: graph.clone() })
-        }
-        Adapter::Builtin { provider, model } => {
-            Box::new(builtin::BuiltinAdapter { policy: *provider, model: model.clone(), router_override: None })
-        }
+        Adapter::Acp { command, args } => Box::new(acp::AcpAdapter {
+            command: command.clone(),
+            args: args.clone(),
+        }),
+        Adapter::Command { command, args } => Box::new(command::CommandAdapter {
+            command: command.clone(),
+            args: args.clone(),
+        }),
+        Adapter::Langgraph { endpoint, graph } => Box::new(langgraph::LangGraphAdapter {
+            endpoint: endpoint.clone(),
+            graph: graph.clone(),
+        }),
+        Adapter::Builtin { provider, model } => Box::new(builtin::BuiltinAdapter {
+            policy: *provider,
+            model: model.clone(),
+            router_override: None,
+        }),
     }
 }
