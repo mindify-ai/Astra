@@ -39,8 +39,8 @@ pub struct Jwt {
 
 impl Jwt {
     /// Keys from a shared secret.
-    pub fn new(secret: &[u8]) -> Self {
-        Jwt { enc: EncodingKey::from_secret(secret), dec: DecodingKey::from_secret(secret) }
+    pub fn new(secret: &[u8]) -> Result<Self, jsonwebtoken::errors::Error> {
+        Ok(Jwt { enc: EncodingKey::from_secret(secret)?, dec: DecodingKey::from_secret(secret)? })
     }
 
     /// Issue a token for `person` in `workspace`.
@@ -440,12 +440,12 @@ mod tests {
 
     #[test]
     fn jwt_roundtrip_and_rejects() {
-        let jwt = Jwt::new(b"secret");
+        let jwt = Jwt::new(b"secret").expect("jwt");
         let (token, claims) = jwt.issue("p-1", "ws-1").expect("issue");
         assert_eq!(jwt.verify(&token).expect("verify"), claims);
-        assert!(Jwt::new(b"other").verify(&token).is_err());
+        assert!(Jwt::new(b"other").expect("jwt").verify(&token).is_err());
         let past = Claims { sub: "p".into(), ws: "w".into(), iat: 0, exp: 1000 };
-        let old = jsonwebtoken::encode(&Header::new(Algorithm::HS256), &past, &EncodingKey::from_secret(b"secret")).expect("enc");
+        let old = jsonwebtoken::encode(&Header::new(Algorithm::HS256), &past, &EncodingKey::from_secret(b"secret").expect("key")).expect("enc");
         assert!(jwt.verify(&old).is_err());
     }
 

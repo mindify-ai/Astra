@@ -74,6 +74,8 @@ pub enum StartupError {
     Migrate(#[from] sqlx::migrate::MigrateError),
     #[error("http client: {0}")]
     Http(String),
+    #[error("jwt: {0}")]
+    Jwt(#[from] jsonwebtoken::errors::Error),
 }
 
 /// Shared handler state.
@@ -100,7 +102,7 @@ pub async fn build_state(config: ServerConfig, shutdown: watch::Receiver<bool>) 
         }
         _ => return Err(StartupError::MissingJwtSecret),
     };
-    let jwt = Jwt::new(secret.as_bytes());
+    let jwt = Jwt::new(secret.as_bytes())?;
     let (log, db, directory): (Arc<dyn OpLog>, Option<sqlx::PgPool>, Directory) = match &config.database_url {
         Some(url) if !url.is_empty() => {
             let pool = sqlx::postgres::PgPoolOptions::new()

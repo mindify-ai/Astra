@@ -26,7 +26,7 @@ tower.workspace = true
 tower-http.workspace = true
 sqlx.workspace = true
 jsonwebtoken.workspace = true
-reqwest.workspace = true
+reqwest = { workspace = true, features = ["form"] }
 chrono.workspace = true
 clap.workspace = true
 url.workspace = true
@@ -39,6 +39,7 @@ path = "src/main.rs"
 [dev-dependencies]
 astra-store.workspace = true
 astra-node.workspace = true
+wiremock.workspace = true
 tokio-tungstenite.workspace = true
 tempfile.workspace = true
 
