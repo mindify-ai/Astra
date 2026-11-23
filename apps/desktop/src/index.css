@@ -1,0 +1,7 @@
+@import 'tailwindcss';
+@import '@astra/tokens/fonts.css';
+@import '@astra/tokens/theme.css';
+@import '../../../packages/ui/src/base.css';
+
+@source '../../../packages/ui/src';
+@source '../../../packages/app/src';

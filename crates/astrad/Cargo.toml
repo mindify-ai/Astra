@@ -1,0 +1,39 @@
+[package]
+name = "astrad"
+description = "Headless Astra runner node and LAN host."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+astra-protocol.workspace = true
+astra-store.workspace = true
+astra-sync.workspace = true
+astra-node = { workspace = true, features = ["runtime"] }
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+futures.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+clap.workspace = true
+axum.workspace = true
+qrcode.workspace = true
+mdns-sd.workspace = true
+snow.workspace = true
+sha2.workspace = true
+hex.workspace = true
+base64.workspace = true
+ulid.workspace = true
+chrono.workspace = true
+rmp-serde.workspace = true
+tokio-tungstenite.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

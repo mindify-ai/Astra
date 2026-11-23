@@ -1,0 +1,24 @@
+[package]
+name = "astra-protocol"
+description = "Astra protocol: entities, ops, commands, sync frames, HLC and the LWW reducer."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+ulid.workspace = true
+chrono.workspace = true
+
+[dev-dependencies]
+rmp-serde.workspace = true
+
+[[bin]]
+name = "export-ts"
+path = "src/bin/export-ts.rs"
+
+[lints]
+workspace = true
