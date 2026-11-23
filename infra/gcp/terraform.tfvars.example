@@ -1,0 +1,10 @@
+project_id  = "your-gcp-project"
+region      = "asia-east1"
+web_domain  = "app.example.com"
+sync_domain = "sync.example.com"
+
+# Optional
+# dns_zone_name          = "example-com"
+# github_repository      = "mindify-ai/Astra"
+# github_oauth_client_id = "Iv1.xxxxxxxx"
+# db_high_availability   = true

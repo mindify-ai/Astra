@@ -1,0 +1,44 @@
+[package]
+name = "astra-runtime"
+description = "Agent runtime for Astra runner nodes: adapters, supervision, git worktrees, orchestration."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[features]
+default = []
+keyring = ["dep:keyring"]
+
+[dependencies]
+astra-protocol.workspace = true
+astra-llm.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+futures.workspace = true
+async-trait.workspace = true
+tracing.workspace = true
+git2.workspace = true
+which.workspace = true
+reqwest.workspace = true
+regex.workspace = true
+chrono.workspace = true
+keyring = { workspace = true, optional = true }
+
+[target.'cfg(unix)'.dependencies]
+nix.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+wiremock.workspace = true
+
+[[bin]]
+name = "fake-acp-agent"
+path = "src/bin/fake-acp-agent.rs"
+test = false
+
+[lints]
+workspace = true

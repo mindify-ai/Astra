@@ -1,0 +1,24 @@
+node_modules/
+dist/
+target/
+.turbo/
+*.log
+.DS_Store
+.env
+.env.*
+!.env.example
+coverage/
+test-results/
+playwright-report/
+apps/desktop/src-tauri/gen/
+*.db
+*.db-wal
+*.db-shm
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+terraform.tfvars
+backend.hcl

@@ -1,0 +1,7 @@
+# Only the Rust workspace and fixtures go into server images.
+*
+!Cargo.toml
+!Cargo.lock
+!crates/
+!fixtures/
+crates/**/target

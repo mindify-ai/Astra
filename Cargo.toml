@@ -1,0 +1,82 @@
+[workspace]
+resolver = "3"
+members = [
+  "crates/astra-protocol",
+  "crates/astra-store",
+  "crates/astra-sync",
+  "crates/astra-llm",
+  "crates/astra-runtime",
+  "crates/astra-node",
+  "crates/astrad",
+  "crates/astra-server",
+]
+# apps/desktop/src-tauri is a separate workspace-less crate built by the Tauri CLI
+# (it needs webkit2gtk on Linux, so it is not part of the default `cargo test`).
+exclude = ["apps/desktop/src-tauri"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "UNLICENSED"
+repository = "https://github.com/mindify-ai/Astra"
+rust-version = "1.88"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+
+[workspace.dependencies]
+astra-protocol = { path = "crates/astra-protocol" }
+astra-store = { path = "crates/astra-store" }
+astra-sync = { path = "crates/astra-sync" }
+astra-llm = { path = "crates/astra-llm" }
+astra-runtime = { path = "crates/astra-runtime" }
+astra-node = { path = "crates/astra-node", default-features = false }
+astra-server = { path = "crates/astra-server" }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+anyhow = "1"
+ulid = "3"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+tokio = { version = "1", features = ["full"] }
+tokio-util = "0.7"
+futures = "0.3"
+async-trait = "0.1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
+rusqlite = { version = "0.43", features = ["bundled"] }
+rmp-serde = "1.3"
+proptest = "1"
+reqwest = { version = "0.13", default-features = false, features = ["json", "stream", "rustls"] }
+jsonschema = { version = "0.63", default-features = false }
+regex = "1"
+wiremock = "0.6"
+git2 = { version = "0.21", default-features = false, features = ["vendored-libgit2"] }
+tempfile = "3"
+which = "8"
+nix = { version = "0.32", features = ["signal", "process"] }
+axum = { version = "0.8", features = ["ws"] }
+tower = "0.5"
+tower-http = { version = "0.7", features = ["trace", "cors"] }
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "tls-rustls", "postgres", "json", "macros", "migrate", "chrono"] }
+jsonwebtoken = { version = "12", default-features = false, features = ["aws_lc_rs"] }
+tokio-tungstenite = { version = "0.30", features = ["rustls-tls-webpki-roots"] }
+clap = { version = "4", features = ["derive", "env"] }
+qrcode = { version = "0.15", default-features = false }
+mdns-sd = "0.22"
+snow = "0.10"
+keyring = "4"
+sha2 = "0.11"
+hex = "0.4"
+base64 = "0.23"
+url = "2"
+bytes = "1"
