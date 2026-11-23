@@ -44,10 +44,7 @@ impl TestHost {
     }
 
     pub fn result_of(&self, op: &Op) -> Option<(bool, Option<String>)> {
-        self.ops().into_iter().find_map(|o| match o.body {
-            OpBody::CommandResult { command_op, ok, error } if command_op == op.id => Some((ok, error)),
-            _ => None,
-        })
+        result_in(&self.ops(), op)
     }
 }
 
@@ -173,5 +170,13 @@ pub fn membership(mission: &str, person: &str, access: Access) -> Entity {
         mission_id: mission.into(),
         person_id: person.into(),
         access,
+    })
+}
+
+/// The commandResult of `op` among `ops`.
+pub fn result_in(ops: &[Op], op: &Op) -> Option<(bool, Option<String>)> {
+    ops.iter().find_map(|o| match &o.body {
+        OpBody::CommandResult { command_op, ok, error } if *command_op == op.id => Some((*ok, error.clone())),
+        _ => None,
     })
 }

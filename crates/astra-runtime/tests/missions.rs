@@ -57,7 +57,7 @@ async fn split_mission_with_acp_agent_approval_and_merge() {
 
     // Only the owner may decide (approval policy: owner).
     let bad = host.command(&orch, "p-lin", Command::Approve { approval_id: approval_id.clone() });
-    let r = wait_for(&host, "rejected approve", |_, _| host.result_of(&bad)).await;
+    let r = wait_for(&host, "rejected approve", |_, ops| result_in(ops, &bad)).await;
     assert!(!r.0 && r.1.expect("error").contains("may not decide"));
 
     let ok = host.command(&orch, "p-owner", Command::Approve { approval_id: approval_id.clone() });
@@ -105,7 +105,7 @@ async fn split_mission_with_acp_agent_approval_and_merge() {
         "p-lin",
         Command::SendMessage { mission_id: "m-1".into(), to: Some("ma-1".into()), body: "hi".into() },
     );
-    let r = wait_for(&host, "steering rejection", |_, _| host.result_of(&other)).await;
+    let r = wait_for(&host, "steering rejection", |_, ops| result_in(ops, &other)).await;
     assert_eq!(r, (false, Some("steering held by p-owner".into())));
     // Only one human message entity exists (the node does not duplicate it).
     assert_eq!(host.state().messages.values().filter(|m| matches!(m.author, Author::Person { .. })).count(), 1);
@@ -234,7 +234,7 @@ async fn connect_and_test_agents() {
     let orch = orchestrator(host.clone(), tmp.path());
     let c1 = host.command(&orch, "p-owner", Command::ConnectAgent { agent_id: "a-sh".into() });
     let c2 = host.command(&orch, "p-owner", Command::TestAgent { agent_id: "a-missing".into() });
-    wait_for(&host, "results", |_, _| host.result_of(&c2)).await;
+    wait_for(&host, "results", |_, ops| result_in(ops, &c2)).await;
     assert_eq!(host.result_of(&c1), Some((true, None)));
     let (ok, err) = host.result_of(&c2).expect("result");
     assert!(!ok && err.expect("err").contains("not found on PATH"));
