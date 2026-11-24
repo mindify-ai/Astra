@@ -120,6 +120,18 @@ export const colors = {
     "dark": "#0A0A0A",
     "light": "#0A0A0A"
   },
+  "selection": {
+    "dark": "#1E4D80",
+    "light": "#B3D4FC"
+  },
+  "selection-inactive": {
+    "dark": "#2B3440",
+    "light": "#DCE3EC"
+  },
+  "selection-match": {
+    "dark": "#17324F",
+    "light": "#DCEBFD"
+  },
   "window-close": {
     "dark": "#FF5F57",
     "light": "#FF5F57"

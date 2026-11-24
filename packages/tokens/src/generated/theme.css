@@ -32,6 +32,9 @@
   --marking-confidential: #F2B04C;
   --marking-restricted: #FF7A6E;
   --on-marking: #0A0A0A;
+  --selection: #1E4D80;
+  --selection-inactive: #2B3440;
+  --selection-match: #17324F;
   --window-close: #FF5F57;
   --window-minimize: #FEBC2E;
   --window-zoom: #28C840;
@@ -76,6 +79,9 @@
   --marking-confidential: #F2B04C;
   --marking-restricted: #FF7A6E;
   --on-marking: #0A0A0A;
+  --selection: #B3D4FC;
+  --selection-inactive: #DCE3EC;
+  --selection-match: #DCEBFD;
   --window-close: #FF5F57;
   --window-minimize: #FEBC2E;
   --window-zoom: #28C840;
@@ -122,6 +128,9 @@
   --color-marking-confidential: var(--marking-confidential);
   --color-marking-restricted: var(--marking-restricted);
   --color-on-marking: var(--on-marking);
+  --color-selection: var(--selection);
+  --color-selection-inactive: var(--selection-inactive);
+  --color-selection-match: var(--selection-match);
   --color-window-close: var(--window-close);
   --color-window-minimize: var(--window-minimize);
   --color-window-zoom: var(--window-zoom);

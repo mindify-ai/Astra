@@ -1,5 +1,6 @@
 import { demoSeed, type FilesHost, MockClient, memoryFiles, type SeedFile } from '@astra/client'
-import { render, screen, within } from '@testing-library/react'
+import { EditorView } from '@codemirror/view'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { AstraApp } from '../src'
@@ -18,6 +19,25 @@ function mount(host: HostCapabilities, path: string | null = '/work/gateway') {
   const client = new MockClient({ seed: seedWith(path), latency: 0 })
   return render(<AstraApp client={client} platform="mac" history={{ memory: '/code' }} host={host} />)
 }
+
+/** The CodeMirror view showing `path`. */
+async function editorFor(path: string): Promise<EditorView> {
+  const content = await screen.findByLabelText(`Contents of ${path}`)
+  const view = EditorView.findFromDOM(content)
+  if (!view) throw new Error(`no editor for ${path}`)
+  return view
+}
+const textOf = (v: EditorView) => v.state.doc.toString()
+/** Types at the end of the file, as a person would (one transaction, caret after the text). */
+const typeAtEnd = (v: EditorView, text: string) =>
+  act(() => {
+    const end = v.state.doc.length
+    v.dispatch({
+      changes: { from: end, insert: text },
+      selection: { anchor: end + text.length },
+      userEvent: 'input',
+    })
+  })
 
 /** A memory tree whose calls are recorded. */
 function spyFiles(initial: Record<string, string>) {
@@ -52,17 +72,16 @@ describe('code editor', () => {
     await user.click(await within(tree).findByRole('treeitem', { name: 'main.ts' }))
     expect(files.read).toHaveBeenCalledWith('/work/gateway', 'src/main.ts')
 
-    const editor = (await screen.findByLabelText('Contents of src/main.ts')) as HTMLTextAreaElement
-    expect(editor.value).toBe('const a = 1')
+    const editor = await editorFor('src/main.ts')
+    expect(textOf(editor)).toBe('const a = 1')
     expect(screen.getByRole('tab', { name: 'main.ts', selected: true })).toBeTruthy()
     const status = document.querySelector('section[aria-label="Editor"] footer') as HTMLElement
     expect(within(status).getByText('src/main.ts')).toBeTruthy()
     expect(within(status).getByText('TypeScript')).toBeTruthy()
     expect(within(status).getByText('SAVED')).toBeTruthy()
 
-    await user.click(editor)
-    await user.keyboard('{End}{Enter}{Tab}b')
-    expect(editor.value).toBe('const a = 1\n  b')
+    await typeAtEnd(editor, '\n  b')
+    expect(textOf(editor)).toBe('const a = 1\n  b')
     expect(screen.getByRole('tab', { name: 'main.ts, unsaved' })).toBeTruthy()
     expect(within(status).getByText('UNSAVED')).toBeTruthy()
     expect(within(status).getByText('LN 2, COL 4')).toBeTruthy()
@@ -82,12 +101,12 @@ describe('code editor', () => {
     mount({ files })
     const user = userEvent.setup()
     await user.click(await screen.findByRole('treeitem', { name: 'a.json' }))
-    const editor = (await screen.findByLabelText('Contents of a.json')) as HTMLTextAreaElement
-    await user.type(editor, ' ')
+    const editor = await editorFor('a.json')
+    await typeAtEnd(editor, ' ')
     await user.keyboard('{Control>}s{/Control}')
     expect(await screen.findByText('SAVE FAILED')).toBeTruthy()
     expect(screen.getByText('Permission denied')).toBeTruthy()
-    expect(editor.value).toBe('{} ')
+    expect(textOf(editor)).toBe('{} ')
   })
 
   it('walks the tree with the keyboard', async () => {
@@ -106,8 +125,7 @@ describe('code editor', () => {
     await user.keyboard('{Enter}')
     await within(tree).findByRole('treeitem', { name: 'deep.rs' })
     await user.keyboard('{ArrowDown}{Enter}')
-    const editor = (await screen.findByLabelText('Contents of src/lib/deep.rs')) as HTMLTextAreaElement
-    expect(editor.value).toBe('fn main() {}')
+    expect(textOf(await editorFor('src/lib/deep.rs'))).toBe('fn main() {}')
     expect(screen.getByText('Rust')).toBeTruthy()
     // Left goes to the parent, then collapses it.
     await user.click(within(tree).getByRole('treeitem', { name: 'deep.rs' }))
@@ -124,34 +142,55 @@ describe('code editor', () => {
     await user.click(await screen.findByRole('treeitem', { name: 'a.ts' }))
     await user.click(screen.getByRole('treeitem', { name: 'b.ts' }))
     expect(screen.getAllByRole('tab')).toHaveLength(2)
-    await user.type(await screen.findByLabelText('Contents of b.ts'), '!')
+    await typeAtEnd(await editorFor('b.ts'), '!')
     await user.click(screen.getByRole('button', { name: 'Close b.ts' }))
     expect(screen.getAllByRole('tab')).toHaveLength(2)
     await user.click(screen.getByRole('button', { name: 'Discard changes to b.ts' }))
     expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual(['a.ts'])
-    expect(((await screen.findByLabelText('Contents of a.ts')) as HTMLTextAreaElement).value).toBe('a')
+    expect(textOf(await editorFor('a.ts'))).toBe('a')
     await user.click(screen.getByRole('button', { name: 'Close a.ts' }))
     expect(screen.queryAllByRole('tab')).toHaveLength(0)
     expect(screen.getByText('Open a file from the explorer.')).toBeTruthy()
   })
 
-  it('finds in the open file', async () => {
+  it('finds in the open file with the editor search, from inside the editor or anywhere on screen', async () => {
     const files = spyFiles({ 'a.ts': 'let x = 1\nlet y = x' })
     mount({ files })
     const user = userEvent.setup()
     await user.click(await screen.findByRole('treeitem', { name: 'a.ts' }))
-    const editor = (await screen.findByLabelText('Contents of a.ts')) as HTMLTextAreaElement
-    await user.click(editor)
+    const editor = await editorFor('a.ts')
+    // ⌘F from the explorer opens the editor's search.
     await user.keyboard('{Meta>}f{/Meta}')
-    const input = screen.getByRole('textbox', { name: 'Find in file' })
+    const input = await screen.findByRole('textbox', { name: 'Find' })
     expect(document.activeElement).toBe(input)
     await user.type(input, 'let')
-    expect(screen.getByText('1 / 2')).toBeTruthy()
-    await user.keyboard('{Enter}')
-    expect(screen.getByText('2 / 2')).toBeTruthy()
-    expect([editor.selectionStart, editor.selectionEnd]).toEqual([10, 13])
+    // CodeMirror's search box reads the legacy keyCode for Enter, which user-event leaves out in jsdom.
+    const enter = () => fireEvent.keyDown(input, { key: 'Enter', keyCode: 13 })
+    enter()
+    expect([editor.state.selection.main.from, editor.state.selection.main.to]).toEqual([0, 3])
+    enter()
+    expect([editor.state.selection.main.from, editor.state.selection.main.to]).toEqual([10, 13])
     await user.keyboard('{Escape}')
-    expect(screen.queryByRole('textbox', { name: 'Find in file' })).toBeNull()
+    expect(screen.queryByRole('textbox', { name: 'Find' })).toBeNull()
+  })
+
+  it('keeps each tab’s undo history when switching tabs', async () => {
+    const files = spyFiles({ 'a.ts': 'a', 'b.ts': 'b' })
+    mount({ files })
+    const user = userEvent.setup()
+    await user.click(await screen.findByRole('treeitem', { name: 'a.ts' }))
+    await typeAtEnd(await editorFor('a.ts'), '1')
+    await user.click(screen.getByRole('treeitem', { name: 'b.ts' }))
+    await editorFor('b.ts')
+    await user.click(screen.getByRole('tab', { name: 'a.ts, unsaved' }))
+    const a = await editorFor('a.ts')
+    expect(textOf(a)).toBe('a1')
+    const { undo } = await import('@codemirror/commands')
+    act(() => {
+      undo(a)
+    })
+    expect(textOf(a)).toBe('a')
+    expect(screen.getByRole('tab', { name: 'a.ts' })).toBeTruthy()
   })
 
   it('says so when the repository has no local folder', async () => {
@@ -167,15 +206,15 @@ describe('code editor', () => {
     await user.click(await screen.findByRole('treeitem', { name: 'src' }))
     await user.click(await screen.findByRole('treeitem', { name: 'pricing' }))
     await user.click(await screen.findByRole('treeitem', { name: 'handler.ts' }))
-    const editor = (await screen.findByLabelText('Contents of src/pricing/handler.ts')) as HTMLTextAreaElement
+    const editor = textOf(await editorFor('src/pricing/handler.ts'))
     const result = demoSeed.entities.find((e) => e.kind === 'result' && e.id === 'res-015-a')
     const diff = result?.kind === 'result' ? result.diff[0] : undefined
     const expected = diff?.lines
       .filter((l) => l.kind !== 'del')
       .map((l) => l.text)
       .join('\n')
-    expect(editor.value).toBe(expected)
-    expect(diff?.lines.some((l) => l.kind === 'del' && editor.value.includes(l.text))).toBe(false)
+    expect(editor).toBe(expected)
+    expect(diff?.lines.some((l) => l.kind === 'del' && editor.includes(l.text))).toBe(false)
   })
 
   it('builds demo files only from the repository’s own missions', () => {

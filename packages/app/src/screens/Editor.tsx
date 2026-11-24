@@ -6,41 +6,20 @@ import {
   cx,
   Data,
   Eyebrow,
+  FileIcon,
   ResizeHandle,
   Spec,
   SpecStatus,
-  TextInput,
   useResizable,
 } from '@astra/ui'
+import { openSearchPanel } from '@codemirror/search'
+import type { EditorState } from '@codemirror/state'
+import type { EditorView } from '@codemirror/view'
 import { Link } from '@tanstack/react-router'
-import {
-  type KeyboardEvent,
-  type ReactNode,
-  useCallback,
-  useEffect,
-  useId,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react'
+import { type KeyboardEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAstraState, useHost, useUi } from '../context'
-import {
-  type Language,
-  languageLabel,
-  languageOf,
-  type Token,
-  tokenClass,
-  tokenize,
-} from '../shared/tokenize'
+import { CodeEditor, type Cursor, languageFor } from '../shared/codeEditor'
 import { AppHeader, Page } from '../shell/AppHeader'
-
-/** Files longer than this are shown without colour: the tokenizer runs on every keystroke. */
-const HIGHLIGHT_LIMIT = 200_000
-/** Find stops counting here. */
-const MATCH_LIMIT = 1_000
-/** `py-3` on the code layers, in px. */
-const PAD_Y = 12
 
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err))
 const baseName = (path: string) => path.split('/').pop() ?? path
@@ -184,8 +163,10 @@ function Workspace({
   const [docs, setDocs] = useState<Doc[]>([])
   const [active, setActive] = useState<string | null>(null)
   const [armedClose, setArmedClose] = useState<string | null>(null)
-  const [cursor, setCursor] = useState({ line: 1, col: 1 })
-  const [find, setFind] = useState<{ query: string; index: number } | null>(null)
+  const [cursor, setCursor] = useState<Cursor>({ line: 1, col: 1 })
+  /** Each open file's editor state (undo history, selection, folds), kept while another tab shows. */
+  const states = useRef(new Map<string, EditorState>()).current
+  const view = useRef<EditorView | null>(null)
   const [explorerWidth, explorerHandle] = useResizable({
     storageKey: 'astra.size.editor.explorer',
     initial: 260,
@@ -253,6 +234,7 @@ function Workspace({
       return
     }
     setArmedClose(null)
+    states.delete(path)
     const rest = docsRef.current.filter((d) => d.path !== path)
     const at = docsRef.current.findIndex((d) => d.path === path)
     setDocs(rest)
@@ -277,7 +259,8 @@ function Workspace({
 
   const doc = docs.find((d) => d.path === active) ?? null
 
-  // ⌘S / Ctrl+S saves the open file; ⌘F / Ctrl+F finds in it.
+  // ⌘S / Ctrl+S saves the open file. ⌘F / Ctrl+F finds in it: the editor handles that itself when it has
+  // focus; from anywhere else on the screen it opens the editor's search.
   useEffect(() => {
     const onKey = (e: globalThis.KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return
@@ -285,14 +268,15 @@ function Workspace({
       if (key === 's') {
         e.preventDefault()
         if (active) void save(active)
-      } else if (key === 'f' && doc?.status === 'ready') {
+      } else if (key === 'f' && !e.defaultPrevented && view.current) {
         e.preventDefault()
-        setFind((f) => f ?? { query: '', index: 0 })
+        openSearchPanel(view.current)
+        view.current.dom.querySelector<HTMLInputElement>('[main-field]')?.focus()
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [active, doc?.status, save])
+  }, [active, save])
 
   const rootDir = dirs['']
   return (
@@ -369,6 +353,7 @@ function Workspace({
                   }}
                   className="flex h-full items-center gap-2 border-0 bg-transparent p-0 font-mono text-data text-inherit"
                 >
+                  <FileIcon name={baseName(d.path)} size={14} />
                   {baseName(d.path)}
                   {dirty ? (
                     <span aria-hidden="true" className="inline-block size-1.5 rounded-full bg-ink" />
@@ -414,12 +399,12 @@ function Workspace({
               </p>
             </div>
           ) : (
-            <CodeArea
+            <CodeEditor
               key={doc.path}
-              doc={doc}
-              language={languageOf(doc.path)}
-              find={find}
-              onFind={setFind}
+              path={doc.path}
+              text={doc.text}
+              states={states}
+              viewRef={view}
               onChange={(text) => {
                 setArmedClose(null)
                 patchDoc(doc.path, { text })
@@ -586,9 +571,10 @@ function Tree({
               entry.path === active ? 'bg-signal-soft text-ink' : 'text-ink hover:bg-surface-raised',
             )}
           >
-            <span className="flex w-5 shrink-0 items-center text-ink-muted">
+            <span className="flex w-4 shrink-0 items-center text-ink-muted">
               {dir ? <ChevronLeftIcon size={12} className={open ? '-rotate-90' : 'rotate-180'} /> : null}
             </span>
+            <FileIcon name={entry.name} folder={dir} open={open} className="mr-1.5" />
             <span className={cx('truncate', dir ? 'text-ink' : 'font-mono text-data')}>{entry.name}</span>
           </div>
         )
@@ -597,293 +583,9 @@ function Tree({
   )
 }
 
-// ── Editor pane ────────────────────────────────────────────────────────────
-
-/** Coloured spans for the tokens, with find matches marked (the current one outlined). */
-function renderTokens(tokens: Token[], matches: [number, number][], current: number): ReactNode[] {
-  const out: ReactNode[] = []
-  let pos = 0
-  let mi = 0
-  let key = 0
-  for (const t of tokens) {
-    const end = pos + t.text.length
-    let p = pos
-    while (p < end) {
-      while (mi < matches.length && (matches[mi]?.[1] ?? 0) <= p) mi++
-      const m = matches[mi]
-      const hit = m !== undefined && m[0] <= p
-      const next = hit ? Math.min(end, m[1]) : Math.min(end, m ? m[0] : end)
-      const piece = t.text.slice(p - pos, next - pos)
-      const cls = cx(
-        tokenClass[t.kind],
-        hit && 'bg-warning-soft',
-        hit && mi === current && 'outline outline-1 outline-warning',
-      )
-      out.push(
-        cls ? (
-          <span key={key++} className={cls}>
-            {piece}
-          </span>
-        ) : (
-          piece
-        ),
-      )
-      p = next
-    }
-    pos = end
-  }
-  return out
-}
-
-function findMatches(text: string, query: string): [number, number][] {
-  if (!query) return []
-  const out: [number, number][] = []
-  const hay = text.toLowerCase()
-  const needle = query.toLowerCase()
-  for (
-    let i = hay.indexOf(needle);
-    i !== -1 && out.length < MATCH_LIMIT;
-    i = hay.indexOf(needle, i + needle.length)
-  ) {
-    out.push([i, i + needle.length])
-  }
-  return out
-}
-
-function lineCol(text: string, offset: number) {
-  let line = 1
-  let start = 0
-  for (let i = 0; i < offset; i++) {
-    if (text.charCodeAt(i) === 10) {
-      line++
-      start = i + 1
-    }
-  }
-  return { line, col: offset - start + 1 }
-}
-
-/** The textarea's line height in px (20 for `text-code` when styles aren't computed). */
-function lineHeightOf(el: HTMLElement): number {
-  const lh = Number.parseFloat(getComputedStyle(el).lineHeight)
-  return Number.isFinite(lh) && lh > 0 ? lh : 20
-}
-
-function CodeArea({
-  doc,
-  language,
-  find,
-  onFind,
-  onChange,
-  onCursor,
-}: {
-  doc: Doc
-  language: Language
-  find: { query: string; index: number } | null
-  onFind: (f: { query: string; index: number } | null) => void
-  onChange: (text: string) => void
-  onCursor: (c: { line: number; col: number }) => void
-}) {
-  const text = doc.text
-  const area = useRef<HTMLTextAreaElement>(null)
-  const scroller = useRef<HTMLDivElement>(null)
-  const findId = useId()
-  const escaped = useRef(false)
-  const pendingCaret = useRef<number | null>(null)
-
-  const tokens = useMemo(
-    () => tokenize(text, text.length > HIGHLIGHT_LIMIT ? 'plain' : language),
-    [text, language],
-  )
-  const matches = useMemo(() => findMatches(text, find?.query ?? ''), [text, find?.query])
-  const current = matches.length ? (find?.index ?? 0) % matches.length : -1
-  const lineCount = useMemo(() => {
-    let n = 1
-    for (let i = 0; i < text.length; i++) if (text.charCodeAt(i) === 10) n++
-    return n
-  }, [text])
-  const gutter = useMemo(() => Array.from({ length: lineCount }, (_, i) => i + 1).join('\n'), [lineCount])
-
-  /** Scrolls the pane so `offset`'s line is visible. */
-  const reveal = useCallback((offset: number) => {
-    const sc = scroller.current
-    if (!sc || !area.current) return
-    const lh = lineHeightOf(area.current)
-    const top = (lineCol(area.current.value, offset).line - 1) * lh + PAD_Y
-    if (top < sc.scrollTop) sc.scrollTop = Math.max(0, top - lh)
-    else if (top + lh > sc.scrollTop + sc.clientHeight) sc.scrollTop = top + 2 * lh - sc.clientHeight
-  }, [])
-
-  const syncCursor = () => {
-    const el = area.current
-    if (el) onCursor(lineCol(el.value, el.selectionStart))
-  }
-
-  // Put the caret back after a programmatic edit (Tab without execCommand).
-  useLayoutEffect(() => {
-    const el = area.current
-    const at = pendingCaret.current
-    if (!el || at === null) return
-    pendingCaret.current = null
-    el.setSelectionRange(at, at)
-    onCursor(lineCol(el.value, at))
-  })
-
-  // Focus the find box when it opens.
-  const findOpen = find !== null
-  useEffect(() => {
-    if (findOpen) document.getElementById(findId)?.focus()
-  }, [findOpen, findId])
-
-  // Select and reveal the current match when the query or the step changes (not on every edit).
-  const matchRef = useRef<[number, number] | undefined>(undefined)
-  matchRef.current = current >= 0 ? matches[current] : undefined
-  // biome-ignore lint/correctness/useExhaustiveDependencies: follows the find box, not the text
-  useEffect(() => {
-    const m = matchRef.current
-    if (!m || !area.current) return
-    area.current.setSelectionRange(m[0], m[1])
-    reveal(m[0])
-  }, [find?.query, current, reveal])
-
-  const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Escape') {
-      // Escape, then Tab, leaves the editor (Tab alone indents).
-      escaped.current = true
-      return
-    }
-    if (e.key === 'Tab' && !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey) {
-      if (escaped.current) {
-        escaped.current = false
-        return
-      }
-      e.preventDefault()
-      const el = e.currentTarget
-      // execCommand keeps the browser's undo history; fall back to a plain edit where it's missing.
-      const inserted =
-        typeof document.execCommand === 'function' && document.execCommand('insertText', false, '  ')
-      if (!inserted) {
-        const { selectionStart: a, selectionEnd: b, value } = el
-        pendingCaret.current = a + 2
-        onChange(`${value.slice(0, a)}  ${value.slice(b)}`)
-      }
-      return
-    }
-    escaped.current = false
-  }
-
-  const step = (by: number) => {
-    if (!find || matches.length === 0) return
-    onFind({ ...find, index: (current + by + matches.length) % matches.length })
-  }
-  const closeFind = () => {
-    onFind(null)
-    area.current?.focus()
-  }
-
-  return (
-    <>
-      {find ? (
-        <search className="flex shrink-0 items-center gap-2 border-b border-line bg-surface-alt px-4 py-1.5">
-          <TextInput
-            id={findId}
-            size="sm"
-            mono
-            aria-label="Find in file"
-            placeholder="Find"
-            value={find.query}
-            onChange={(e) => onFind({ query: e.target.value, index: 0 })}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault()
-                step(e.shiftKey ? -1 : 1)
-              } else if (e.key === 'Escape') {
-                e.preventDefault()
-                closeFind()
-              }
-            }}
-            className="w-64"
-          />
-          <Spec aria-live="polite">
-            {!find.query
-              ? 'TYPE TO FIND'
-              : matches.length
-                ? `${current + 1} / ${matches.length}${matches.length >= MATCH_LIMIT ? '+' : ''}`
-                : 'NO MATCHES'}
-          </Spec>
-          <button
-            type="button"
-            className={buttonClass('text', 'sm')}
-            onClick={() => step(-1)}
-            disabled={!matches.length}
-          >
-            PREV
-          </button>
-          <button
-            type="button"
-            className={buttonClass('text', 'sm')}
-            onClick={() => step(1)}
-            disabled={!matches.length}
-          >
-            NEXT
-          </button>
-          <button
-            type="button"
-            aria-label="Close find"
-            onClick={closeFind}
-            className="ml-auto flex size-7 items-center justify-center rounded-sm border-0 bg-transparent p-0 text-ink-muted hover:text-ink"
-          >
-            <CloseIcon size={14} />
-          </button>
-        </search>
-      ) : null}
-      <div ref={scroller} className="relative min-h-0 grow overflow-auto bg-surface-sunken">
-        <div className="flex min-h-full w-max min-w-full">
-          <pre
-            aria-hidden="true"
-            className="sticky left-0 z-10 m-0 shrink-0 select-none border-r border-line bg-surface-sunken py-3 pr-3 pl-4 text-right font-mono text-code text-ink-muted"
-          >
-            {gutter}
-          </pre>
-          <div className="relative grow">
-            <pre
-              aria-hidden="true"
-              className="m-0 whitespace-pre px-4 py-3 font-mono text-code text-ink [tab-size:4]"
-            >
-              {renderTokens(tokens, matches, current)}
-              {'\n'}
-            </pre>
-            <textarea
-              ref={area}
-              aria-label={`Contents of ${doc.path}`}
-              value={text}
-              wrap="off"
-              spellCheck={false}
-              autoCapitalize="off"
-              autoComplete="off"
-              autoCorrect="off"
-              onChange={(e) => {
-                onChange(e.target.value)
-                reveal(e.target.selectionEnd)
-              }}
-              onKeyDown={onKeyDown}
-              onSelect={syncCursor}
-              onKeyUp={(e) => {
-                syncCursor()
-                if (e.key.startsWith('Arrow') || e.key.startsWith('Page'))
-                  reveal(e.currentTarget.selectionEnd)
-              }}
-              className="absolute inset-0 m-0 box-border block size-full resize-none overflow-hidden whitespace-pre rounded-none border-0 bg-transparent px-4 py-3 font-mono text-code text-transparent caret-ink outline-none [tab-size:4] selection:bg-signal-soft"
-            />
-          </div>
-        </div>
-      </div>
-    </>
-  )
-}
-
 // ── Status bar ─────────────────────────────────────────────────────────────
 
-function StatusBar({ doc, cursor }: { doc: Doc | null; cursor: { line: number; col: number } }) {
+function StatusBar({ doc, cursor }: { doc: Doc | null; cursor: Cursor }) {
   let status: ReactNode = null
   if (doc?.status === 'ready') {
     status = doc.saving ? (
@@ -909,7 +611,7 @@ function StatusBar({ doc, cursor }: { doc: Doc | null; cursor: { line: number; c
             {doc.path}
           </Data>
           <span className="grow" />
-          <Spec>{languageLabel[languageOf(doc.path)]}</Spec>
+          <Spec>{languageFor(doc.path).label}</Spec>
           {doc.status === 'ready' ? (
             <Spec>
               LN {cursor.line}, COL {cursor.col}

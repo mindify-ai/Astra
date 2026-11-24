@@ -221,7 +221,8 @@ function Shell({
           background: cssVar('--surface', '#000000'),
           foreground: cssVar('--ink', '#ffffff'),
           cursor: cssVar('--signal', '#8cd44a'),
-          selectionBackground: cssVar('--line-strong', '#555555'),
+          selectionBackground: cssVar('--selection', '#1e4d80'),
+          selectionInactiveBackground: cssVar('--selection-inactive', '#2b3440'),
         },
       })
       const fit = new FitAddon()
