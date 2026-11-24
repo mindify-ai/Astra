@@ -1,6 +1,6 @@
 import { demoSeed, type FilesHost, MockClient, memoryFiles, type SeedFile } from '@astra/client'
 import { EditorView } from '@codemirror/view'
-import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { AstraApp } from '../src'
@@ -191,6 +191,48 @@ describe('code editor', () => {
     })
     expect(textOf(a)).toBe('a')
     expect(screen.getByRole('tab', { name: 'a.ts' })).toBeTruthy()
+  })
+
+  it('colours changes since the last commit, and the DIFF button turns it off', async () => {
+    const files = memoryFiles({ 'a.ts': 'one\nTWO\nthree\nfour' }, { 'a.ts': 'one\ntwo\nthree\ngone\nfour' })
+    mount({ files })
+    const user = userEvent.setup()
+    await user.click(await screen.findByRole('treeitem', { name: 'a.ts' }))
+    const editor = await editorFor('a.ts')
+    const status = document.querySelector('section[aria-label="Editor"] footer') as HTMLElement
+    // "two" became "TWO" (1 changed line), "gone" was removed.
+    await within(status).findByText('+1')
+    expect(within(status).getByText('−2')).toBeTruthy()
+    expect(editor.dom.querySelector('.cm-changedLine')).toBeTruthy()
+    const removed = [...editor.dom.querySelectorAll('.cm-deletedChunk')].map((c) => c.textContent)
+    expect(removed.some((t) => t?.includes('two'))).toBe(true)
+    expect(removed.some((t) => t?.includes('gone'))).toBe(true)
+
+    const toggle = within(status).getByRole('button', { name: 'DIFF' })
+    expect(toggle.getAttribute('aria-pressed')).toBe('true')
+    await user.click(toggle)
+    expect(toggle.getAttribute('aria-pressed')).toBe('false')
+    expect(within(status).queryByText('+1')).toBeNull()
+    expect(editor.dom.querySelector('.cm-changedLine')).toBeNull()
+    await user.click(toggle)
+    expect(await within(status).findByText('+1')).toBeTruthy()
+  })
+
+  it('without version control, colours unsaved edits until they are saved', async () => {
+    const files = spyFiles({ 'b.ts': 'x' })
+    mount({ files })
+    const user = userEvent.setup()
+    await user.click(await screen.findByRole('treeitem', { name: 'b.ts' }))
+    const editor = await editorFor('b.ts')
+    const status = document.querySelector('section[aria-label="Editor"] footer') as HTMLElement
+    const added = () => within(status).queryByText(/^\+\d+$/)
+    expect(added()).toBeNull()
+    await typeAtEnd(editor, '\ny')
+    await waitFor(() => expect(added()).toBeTruthy())
+    expect(editor.dom.querySelector('.cm-changedLine')).toBeTruthy()
+    await user.keyboard('{Meta>}s{/Meta}')
+    await within(status).findByText('SAVED')
+    await waitFor(() => expect(added()).toBeNull())
   })
 
   it('says so when the repository has no local folder', async () => {

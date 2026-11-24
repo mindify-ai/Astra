@@ -325,8 +325,8 @@ const linesIn = (text: string) => (text ? text.split('\n').length - (text.endsWi
 /** Lines added and removed against the original, or null when the diff is off. */
 export function diffCount(state: EditorState): DiffCount | null {
   const result = getChunks(state)
+  if (!result) return null
   const original = getOriginalDoc(state)
-  if (!result || !original) return null
   let added = 0
   let removed = 0
   for (const c of result.chunks) {
