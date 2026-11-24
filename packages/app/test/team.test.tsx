@@ -20,7 +20,10 @@ describe("a mission's agents", () => {
       'type:at-security-reviewer',
     )
     // Picking the type also picked its agent: Codex now builds and reviews for security.
-    expect(screen.getByRole('combobox', { name: 'Agent for Security reviewer' })).toHaveProperty('value', 'a-codex')
+    expect(screen.getByRole('combobox', { name: 'Agent for Security reviewer' })).toHaveProperty(
+      'value',
+      'a-codex',
+    )
     await user.click(screen.getByRole('button', { name: 'Remove Planner on Claude Code' }))
     await user.click(screen.getByRole('button', { name: /start mission/i }))
     await screen.findByRole('list', { name: 'Thread' })
@@ -76,7 +79,10 @@ describe("a mission's agents", () => {
     await user.type(within(form).getByLabelText('Instructions'), 'Plan schema changes in reversible steps.')
     await user.click(within(form).getByRole('button', { name: 'Save agent type' }))
     const created = Object.values(client.getState().agentTypes).find((t) => t.name === 'Migration planner')
-    expect(created).toMatchObject({ role: 'planner', instructions: 'Plan schema changes in reversible steps.' })
+    expect(created).toMatchObject({
+      role: 'planner',
+      instructions: 'Plan schema changes in reversible steps.',
+    })
 
     await user.click(screen.getByRole('button', { name: 'Delete Migration planner' }))
     await user.click(screen.getByRole('button', { name: 'Delete Migration planner' }))

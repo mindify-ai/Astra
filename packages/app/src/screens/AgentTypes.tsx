@@ -31,7 +31,7 @@ export function AgentTypesSection() {
   const edit = (t: AgentType) =>
     setDraft({ id: t.id, name: t.name, role: t.role, agentId: t.agentId, instructions: t.instructions })
   const save = async () => {
-    if (!draft || !draft.name.trim() || !draft.agentId) return
+    if (!draft?.name.trim() || !draft.agentId) return
     await saveAgentType(client, draft)
     setDraft(null)
   }

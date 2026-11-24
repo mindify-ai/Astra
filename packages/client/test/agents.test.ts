@@ -22,7 +22,9 @@ describe("changing a mission's agents", () => {
       ok: false,
       error: 'Cursor CLI is not connected',
     })
-    expect((await switchAgent(c, 'ma-014-tester', 'a-codex'))?.error).toBe('decide its pending approval first')
+    expect((await switchAgent(c, 'ma-014-tester', 'a-codex'))?.error).toBe(
+      'decide its pending approval first',
+    )
     expect(c.getState().missionAgents['ma-014-builder']?.agentId).toBe('a-codex')
   })
 
