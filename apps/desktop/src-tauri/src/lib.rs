@@ -268,8 +268,76 @@ fn forward_events(app: AppHandle, node: Arc<Node>) {
     });
 }
 
+/// An app opened from Finder or the Dock gets launchd's minimal PATH (`/usr/bin:/bin:/usr/sbin:/sbin`), so
+/// agent CLIs installed with Homebrew, npm or a Node version manager would not be found. Add the login
+/// shell's PATH and the usual install folders; agents the runtime starts inherit it.
+#[cfg(all(unix, not(any(target_os = "ios", target_os = "android"))))]
+fn extend_path() {
+    let mut dirs: Vec<PathBuf> = std::env::var_os("PATH")
+        .map(|p| std::env::split_paths(&p).collect())
+        .unwrap_or_default();
+    let mut add = |d: PathBuf| {
+        if !d.as_os_str().is_empty() && !dirs.contains(&d) {
+            dirs.push(d);
+        }
+    };
+    if let Some(path) = login_shell_path() {
+        std::env::split_paths(&path).for_each(&mut add);
+    }
+    if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
+        for rel in [
+            ".local/bin",
+            ".npm-global/bin",
+            ".bun/bin",
+            ".volta/bin",
+            ".cargo/bin",
+        ] {
+            add(home.join(rel));
+        }
+    }
+    for d in ["/opt/homebrew/bin", "/usr/local/bin"] {
+        add(PathBuf::from(d));
+    }
+    if let Ok(joined) = std::env::join_paths(dirs) {
+        // SAFETY: called first thing in `run`, before Tauri or the async runtime start any threads.
+        unsafe { std::env::set_var("PATH", joined) };
+    }
+}
+
+/// `$PATH` as the user's interactive login shell sets it, or `None` if that takes over 3 s.
+#[cfg(all(unix, not(any(target_os = "ios", target_os = "android"))))]
+fn login_shell_path() -> Option<String> {
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
+    const MARK: &str = "__ASTRA_PATH__";
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
+    let mut child = Command::new(shell)
+        .args(["-ilc", &format!("printf '{MARK}%s{MARK}' \"$PATH\"")])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while child.try_wait().ok()?.is_none() {
+        if Instant::now() > deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return None;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    let mut out = String::new();
+    std::io::Read::read_to_string(&mut child.stdout.take()?, &mut out).ok()?;
+    // Profile scripts may print banners: keep only what sits between the markers.
+    let path = out.split(MARK).nth(1)?.trim();
+    (!path.is_empty()).then(|| path.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(all(unix, not(any(target_os = "ios", target_os = "android"))))]
+    extend_path();
     tauri::Builder::default()
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_dialog::init())

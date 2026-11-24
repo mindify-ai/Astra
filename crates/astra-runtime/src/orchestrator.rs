@@ -591,10 +591,8 @@ impl Orchestrator {
             .ok_or_else(|| format!("unknown agent {agent_id}"))?;
         let check: Result<(), String> = match &agent.adapter {
             None => Err("no adapter configured".into()),
-            Some(Adapter::Acp { command, .. }) | Some(Adapter::Command { command, .. }) => {
-                which::which(command)
-                    .map(|_| ())
-                    .map_err(|_| format!("`{command}` was not found on PATH"))
+            Some(Adapter::Acp { command, args }) | Some(Adapter::Command { command, args }) => {
+                crate::process::resolve_program(command, args).map(|_| ())
             }
             Some(Adapter::Langgraph { endpoint, .. }) => {
                 let url = format!("{}/ok", endpoint.trim_end_matches('/'));

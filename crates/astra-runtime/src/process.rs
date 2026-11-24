@@ -1,7 +1,7 @@
 //! Child process supervision: process groups, kill on drop, pause/resume, log ring buffers.
 
 use std::collections::VecDeque;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 
@@ -55,6 +55,45 @@ pub fn pump_lines<R: AsyncRead + Unpin + Send + 'static>(
             ring.push(format!("{prefix}{line}"));
         }
     });
+}
+
+/// Agent Client Protocol bridges Astra knows by command name, and the npm package that provides each.
+/// `claude-code-acp` is the bridge's old name, kept so agents set up with it still resolve.
+pub const KNOWN_BRIDGES: &[(&str, &str)] = &[
+    ("claude-agent-acp", "@agentclientprotocol/claude-agent-acp"),
+    ("claude-code-acp", "@agentclientprotocol/claude-agent-acp"),
+    ("codex-acp", "@agentclientprotocol/codex-acp"),
+];
+
+/// Finds the program to run for an agent's `command args`. A known ACP bridge that isn't installed runs
+/// through `npx -y <package>` instead, so connecting Claude Code or Codex needs only Node.js.
+pub fn resolve_program(command: &str, args: &[String]) -> Result<(PathBuf, Vec<String>), String> {
+    resolve_with(command, args, |c| which::which(c).ok())
+}
+
+fn resolve_with(
+    command: &str,
+    args: &[String],
+    find: impl Fn(&str) -> Option<PathBuf>,
+) -> Result<(PathBuf, Vec<String>), String> {
+    let command = command.trim();
+    if command.is_empty() {
+        return Err("no command configured".into());
+    }
+    if let Some(path) = find(command) {
+        return Ok((path, args.to_vec()));
+    }
+    let Some((_, package)) = KNOWN_BRIDGES.iter().find(|(name, _)| *name == command) else {
+        return Err(format!("`{command}` was not found on PATH"));
+    };
+    let Some(npx) = find("npx") else {
+        return Err(format!(
+            "`{command}` was not found on PATH. Install Node.js, or run `npm install -g {package}`"
+        ));
+    };
+    let mut argv = vec!["-y".to_string(), (*package).to_string()];
+    argv.extend(args.iter().cloned());
+    Ok((npx, argv))
 }
 
 /// A child in its own process group; the whole group is killed when this is dropped.
@@ -129,5 +168,51 @@ impl Drop for Supervised {
         if matches!(self.child.try_wait(), Ok(None)) {
             self.kill();
         }
+    }
+}
+
+#[cfg(test)]
+mod resolve_tests {
+    use super::*;
+
+    fn found(names: &'static [&'static str]) -> impl Fn(&str) -> Option<PathBuf> {
+        move |c| {
+            names
+                .contains(&c)
+                .then(|| PathBuf::from(format!("/bin/{c}")))
+        }
+    }
+
+    #[test]
+    fn installed_command_runs_directly() {
+        let (p, a) =
+            resolve_with("codex-acp", &["--x".into()], found(&["codex-acp", "npx"])).unwrap();
+        assert_eq!(p, PathBuf::from("/bin/codex-acp"));
+        assert_eq!(a, vec!["--x".to_string()]);
+    }
+
+    #[test]
+    fn missing_bridge_runs_through_npx() {
+        for (cmd, pkg) in [
+            ("claude-code-acp", "@agentclientprotocol/claude-agent-acp"),
+            ("claude-agent-acp", "@agentclientprotocol/claude-agent-acp"),
+            ("codex-acp", "@agentclientprotocol/codex-acp"),
+        ] {
+            let (p, a) = resolve_with(cmd, &[], found(&["npx"])).unwrap();
+            assert_eq!(p, PathBuf::from("/bin/npx"));
+            assert_eq!(a, vec!["-y".to_string(), pkg.to_string()]);
+        }
+    }
+
+    #[test]
+    fn missing_commands_explain_what_to_install() {
+        let e = resolve_with("codex-acp", &[], found(&[])).unwrap_err();
+        assert!(
+            e.contains("npm install -g @agentclientprotocol/codex-acp"),
+            "{e}"
+        );
+        let e = resolve_with("my-agent", &[], found(&["npx"])).unwrap_err();
+        assert_eq!(e, "`my-agent` was not found on PATH");
+        assert!(resolve_with(" ", &[], found(&["npx"])).is_err());
     }
 }

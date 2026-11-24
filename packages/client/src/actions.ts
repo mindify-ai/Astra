@@ -1,6 +1,6 @@
 import { ulid } from './hlc'
-import type { AstraClient } from './store'
-import type { Access, Command, Entity, Id, MissionAgent, MissionMode, OpBody, Role, State } from './types'
+import type { AstraClient, CommandOutcome } from './store'
+import type { Access, Command, Entity, Id, MissionAgent, MissionMode, Op, OpBody, Role, State } from './types'
 
 /** Runner node that executes commands for a mission. Falls back to the local desktop node id. */
 export function nodeForMission(state: State, missionId: Id): Id {
@@ -167,19 +167,35 @@ export function agentCommand(
   return client.submit([command(nodeForMission(state, ma.missionId), { type, missionAgentId })])
 }
 
-export function connectAgent(
+/** The outcome of the command op among `ops` (null if the node did not answer in time). */
+async function outcomeOf(client: AstraClient, ops: Op[]): Promise<CommandOutcome | null> {
+  const cmd = ops.find((o) => o.body.type === 'command')
+  return cmd ? client.commandResult(cmd.id) : null
+}
+
+/** Saves an agent's setup and asks its node to connect it; resolves with the node's answer. */
+export async function connectAgent(
   client: AstraClient,
   agentId: Id,
   patch: Record<string, unknown>,
   node = DEFAULT_NODE,
-) {
+): Promise<CommandOutcome | null> {
   const state = client.getState()
   const nodeId =
     state.agents[agentId]?.nodeId ?? Object.values(state.agents).find((a) => a.nodeId)?.nodeId ?? node
-  return client.submit([
+  const ops = await client.submit([
     { type: 'patch', entityKind: 'agent', id: agentId, fields: { ...patch, nodeId, status: 'settingUp' } },
     command(nodeId, { type: 'connectAgent', agentId }),
   ])
+  return outcomeOf(client, ops)
+}
+
+/** Asks the agent's node whether it can reach the agent as set up now; resolves with the node's answer. */
+export async function testAgent(client: AstraClient, agentId: Id): Promise<CommandOutcome | null> {
+  const state = client.getState()
+  const nodeId =
+    state.agents[agentId]?.nodeId ?? Object.values(state.agents).find((a) => a.nodeId)?.nodeId ?? DEFAULT_NODE
+  return outcomeOf(client, await client.submit([command(nodeId, { type: 'testAgent', agentId })]))
 }
 
 export function setMembership(client: AstraClient, missionId: Id, personId: Id, access: Access | null) {

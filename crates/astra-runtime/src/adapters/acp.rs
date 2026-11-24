@@ -120,7 +120,9 @@ impl AgentAdapter for AcpAdapter {
     fn start(&self, ctx: AgentContext) -> Result<AgentSession, AdapterError> {
         let workspace = Workspace::new(&ctx.worktree)
             .map_err(|e| AdapterError::Other(format!("worktree: {e}")))?;
-        let mut proc = Supervised::spawn(&self.command, &self.args, workspace.root())
+        let (program, args) = crate::process::resolve_program(&self.command, &self.args)
+            .map_err(|e| AdapterError::Spawn(self.command.clone(), e))?;
+        let mut proc = Supervised::spawn(&program.to_string_lossy(), &args, workspace.root())
             .map_err(|e| AdapterError::Spawn(self.command.clone(), e.to_string()))?;
         let (ctl_tx, ctl_rx) = mpsc::unbounded_channel();
         let (ev_tx, ev_rx) = mpsc::unbounded_channel();

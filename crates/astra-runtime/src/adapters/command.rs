@@ -16,7 +16,9 @@ impl AgentAdapter for CommandAdapter {
     fn start(&self, ctx: AgentContext) -> Result<AgentSession, AdapterError> {
         let (ctl_tx, mut ctl_rx) = mpsc::unbounded_channel();
         let (ev_tx, ev_rx) = mpsc::unbounded_channel();
-        let (command, args) = (self.command.clone(), self.args.clone());
+        let (program, args) = crate::process::resolve_program(&self.command, &self.args)
+            .map_err(|e| AdapterError::Spawn(self.command.clone(), e))?;
+        let command = program.to_string_lossy().into_owned();
         // Spawn eagerly so a missing binary is reported to the caller.
         let first = Supervised::spawn(&command, &args, &ctx.worktree)
             .map_err(|e| AdapterError::Spawn(command.clone(), e.to_string()))?;

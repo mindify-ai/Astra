@@ -1,9 +1,10 @@
 import {
   type Adapter,
   type AgentConnection,
+  type CommandOutcome,
   type CommandPolicy,
   connectAgent,
-  nodeForMission,
+  testAgent,
 } from '@astra/client'
 import {
   Button,
@@ -19,7 +20,7 @@ import {
   TextInput,
 } from '@astra/ui'
 import { Link } from '@tanstack/react-router'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useAstraState, useClient } from '../context'
 import { AppHeader, Page } from '../shell/AppHeader'
 
@@ -49,7 +50,8 @@ function RowStatus({
 }) {
   if (agent.status === 'connected') return <Status tone="success">Connected</Status>
   if (agent.status === 'offline') return <Status tone="idle">Offline</Status>
-  if (agent.status === 'settingUp' || selected) return <Status tone="working">Setting up</Status>
+  if (agent.status === 'settingUp') return <Status tone="working">Setting up</Status>
+  if (selected) return <Status tone="idle">Not connected</Status>
   return (
     <button
       type="button"
@@ -62,28 +64,35 @@ function RowStatus({
   )
 }
 
+type Note = { tone: 'working' | 'success' | 'danger'; text: string }
+
+/** Keyed by agent id, so a status update from the node does not reset what you are typing. */
 function SetupForm({ agent }: { agent: AgentConnection }) {
   const client = useClient()
-  const state = useAstraState()
   const [name, setName] = useState(agent.name)
-  const [adapter, setAdapter] = useState<Adapter>(defaultAdapter(agent))
+  const [adapter, setAdapter] = useState<Adapter>(() => defaultAdapter(agent))
   const [runsOn, setRunsOn] = useState(agent.runsOn)
   const [policy, setPolicy] = useState<CommandPolicy>(agent.commandPolicy)
-  const [tested, setTested] = useState<string | null>(null)
+  const [note, setNote] = useState<Note | null>(null)
 
-  useEffect(() => {
-    setName(agent.name)
-    setAdapter(defaultAdapter(agent))
-    setRunsOn(agent.runsOn)
-    setPolicy(agent.commandPolicy)
-    setTested(null)
-  }, [agent])
-
-  const save = () => connectAgent(client, agent.id, { name, adapter, runsOn, commandPolicy: policy })
+  const report = (o: CommandOutcome | null, okText: string) =>
+    setNote(
+      o === null
+        ? { tone: 'danger', text: 'This machine did not answer. Is Astra running here?' }
+        : o.ok
+          ? { tone: 'success', text: okText }
+          : { tone: 'danger', text: o.error ?? 'Could not connect.' },
+    )
+  const save = async () => {
+    setNote({ tone: 'working', text: 'Connecting' })
+    report(
+      await connectAgent(client, agent.id, { name, adapter, runsOn, commandPolicy: policy }),
+      'Connected',
+    )
+  }
   const test = async () => {
-    const node = agent.nodeId ?? nodeForMission(state, Object.keys(state.missions)[0] ?? '')
-    await client.submit([{ type: 'command', node, command: { type: 'testAgent', agentId: agent.id } }])
-    setTested('Test sent to this machine.')
+    setNote({ tone: 'working', text: 'Testing' })
+    report(await testAgent(client, agent.id), 'Reachable from this machine')
   }
 
   return (
@@ -204,11 +213,9 @@ function SetupForm({ agent }: { agent: AgentConnection }) {
           Test
         </Button>
       </div>
-      {tested ? (
-        <p className="m-0 text-[13px] text-ink-muted" role="status">
-          {tested}
-        </p>
-      ) : null}
+      <div role="status" className="min-h-5 text-[13px]">
+        {note ? <Status tone={note.tone}>{note.text}</Status> : null}
+      </div>
       <Spec as="p" className="m-0 border-t border-line pt-4">
         Keys stay on this machine. Astra stores none.
       </Spec>
@@ -290,7 +297,7 @@ export function Connect() {
           })}
         </main>
         <aside className="box-border flex-[1_1_360px] border-l border-line bg-surface-alt px-6 py-8">
-          {selected ? <SetupForm agent={selected} /> : null}
+          {selected ? <SetupForm key={selected.id} agent={selected} /> : null}
         </aside>
       </div>
     </Page>

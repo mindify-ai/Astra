@@ -79,7 +79,7 @@
       "vendor": "ANTHROPIC",
       "category": "codingAgent",
       "transport": "CLI on this machine",
-      "adapter": { "type": "acp", "command": "claude-code-acp", "args": [] },
+      "adapter": { "type": "acp", "command": "claude-agent-acp", "args": [] },
       "runsOn": "local",
       "nodeId": "n-mark-desktop",
       "commandPolicy": "askMe",

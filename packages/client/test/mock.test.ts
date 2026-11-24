@@ -1,12 +1,23 @@
 import { describe, expect, it } from 'vitest'
 import seed from '../../../fixtures/seed.json'
-import { approve, createMission, merge, sendMessage } from '../src/actions'
+import { approve, connectAgent, createMission, merge, sendMessage, testAgent } from '../src/actions'
 import { MockClient } from '../src/mock'
 import type { SeedFile } from '../src/store'
 
 const client = () => new MockClient({ seed: seed as SeedFile, latency: 0 })
 
 describe('mock node', () => {
+  it('connect and test resolve with the node answer', async () => {
+    const c = client()
+    expect(await connectAgent(c, 'a-opencode', { name: 'OpenCode' })).toEqual({ ok: true, error: null })
+    expect(c.getState().agents['a-opencode']?.status).toBe('connected')
+    expect(await testAgent(c, 'a-opencode')).toEqual({ ok: true, error: null })
+  })
+
+  it('a command with no answer resolves to null after the timeout', async () => {
+    expect(await client().commandResult('op-never-sent', 5)).toBeNull()
+  })
+
   it('approves a pending command and moves the task', async () => {
     const c = client()
     await approve(c, 'ap-0042', true)

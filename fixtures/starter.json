@@ -18,7 +18,7 @@
       "transport": "CLI on this machine",
       "adapter": {
         "type": "acp",
-        "command": "claude-code-acp",
+        "command": "claude-agent-acp",
         "args": []
       },
       "runsOn": "local",

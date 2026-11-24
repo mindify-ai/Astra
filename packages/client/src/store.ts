@@ -1,6 +1,6 @@
 import { HlcClock, ulid } from './hlc'
 import { applyOps, type Clocks, emptyState, insertEntities, newClocks } from './reducer'
-import type { Connectivity, Entity, Op, OpBody, Presence, State } from './types'
+import type { Connectivity, Entity, Id, Op, OpBody, Presence, State } from './types'
 
 export interface SeedFile {
   workspaceId: string
@@ -14,6 +14,12 @@ export function stateFromSeed(seed: SeedFile): State {
   return { ...s, presence: seed.presence }
 }
 
+/** A runner node's answer to a command op. */
+export interface CommandOutcome {
+  ok: boolean
+  error: string | null
+}
+
 /** What every UI talks to, whether data comes from the in-browser mock, a local Tauri node or a remote relay. */
 export interface AstraClient {
   readonly kind: 'mock' | 'tauri' | 'remote'
@@ -25,6 +31,8 @@ export interface AstraClient {
   /** Stamps the bodies as ops from the current user, applies them locally and sends them on. */
   submit(bodies: OpBody[]): Promise<Op[]>
   setPresence(presence: { missionId: string | null; activity: string } | null): void
+  /** Resolves with the node's result for a command op, or `null` if none arrives within `timeoutMs`. */
+  commandResult(commandOp: Id, timeoutMs?: number): Promise<CommandOutcome | null>
 }
 
 /**
@@ -39,6 +47,8 @@ export abstract class Store implements AstraClient {
   protected connectivity: Connectivity = { online: true, relay: 'disabled' }
   protected clock: HlcClock
   private listeners = new Set<() => void>()
+  private outcomes = new Map<Id, CommandOutcome>()
+  private waiting = new Map<Id, ((o: CommandOutcome) => void)[]>()
 
   constructor(readonly nodeId: string) {
     this.clock = new HlcClock(nodeId)
@@ -66,7 +76,15 @@ export abstract class Store implements AstraClient {
   protected receive(ops: Op[]): void {
     if (ops.length === 0) return
     const sorted = [...ops].sort((a, b) => (a.hlc < b.hlc ? -1 : a.hlc > b.hlc ? 1 : 0))
-    for (const op of sorted) this.clock.observe(op.hlc)
+    for (const op of sorted) {
+      this.clock.observe(op.hlc)
+      if (op.body.type === 'commandResult') {
+        const outcome = { ok: op.body.ok, error: op.body.error }
+        this.outcomes.set(op.body.commandOp, outcome)
+        for (const resolve of this.waiting.get(op.body.commandOp) ?? []) resolve(outcome)
+        this.waiting.delete(op.body.commandOp)
+      }
+    }
     const next = applyOps(this.state, this.clocks, sorted)
     if (next !== this.state) {
       this.state = next
@@ -103,4 +121,22 @@ export abstract class Store implements AstraClient {
   }
 
   protected sendPresence(_presence: Presence[]): void {}
+
+  commandResult(commandOp: Id, timeoutMs = 20_000): Promise<CommandOutcome | null> {
+    const known = this.outcomes.get(commandOp)
+    if (known) return Promise.resolve(known)
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        const rest = (this.waiting.get(commandOp) ?? []).filter((r) => r !== done)
+        if (rest.length) this.waiting.set(commandOp, rest)
+        else this.waiting.delete(commandOp)
+        resolve(null)
+      }, timeoutMs)
+      const done = (o: CommandOutcome) => {
+        clearTimeout(timer)
+        resolve(o)
+      }
+      this.waiting.set(commandOp, [...(this.waiting.get(commandOp) ?? []), done])
+    })
+  }
 }
