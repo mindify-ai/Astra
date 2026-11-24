@@ -60,7 +60,10 @@ export function memoryFiles(
 
   return {
     ...(committed
-      ? { base: async (_root: string, path: string) => committed.get(relativeSegments(path).join('/')) ?? null }
+      ? {
+          base: async (_root: string, path: string) =>
+            committed.get(relativeSegments(path).join('/')) ?? null,
+        }
       : {}),
     async list(_root, dir) {
       const d = relativeSegments(dir).join('/')

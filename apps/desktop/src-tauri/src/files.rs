@@ -311,11 +311,15 @@ mod tests {
         index.write().unwrap();
         let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
         let sig = git2::Signature::now("t", "t@example.com").unwrap();
-        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[]).unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
+            .unwrap();
 
         fs::write(tmp.0.join("repo/src/main.ts"), "export const a = 1\n").unwrap();
         fs::write(tmp.0.join("repo/src/new.ts"), "new\n").unwrap();
-        assert_eq!(base(&root, "src/main.ts").unwrap().as_deref(), Some("export {}\n"));
+        assert_eq!(
+            base(&root, "src/main.ts").unwrap().as_deref(),
+            Some("export {}\n")
+        );
         assert_eq!(base(&root, "src/new.ts").unwrap(), None);
         assert!(base(&root, "../outside/secret.txt").is_err());
     }
