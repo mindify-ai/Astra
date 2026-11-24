@@ -23,6 +23,7 @@ describe('tokenizer', () => {
 
   it('always gives back the input exactly', () => {
     const samples: [string, Language][] = [
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: TypeScript source as data
       ['const a = `x ${y}` // done\n/* open', 'ts'],
       ['fn main() { let s = r#"raw "q""#; \'a\'; }', 'rust'],
       ['{"a": [1, -2.5e3, true, null, "s\\"x"]}', 'json'],
