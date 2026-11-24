@@ -475,3 +475,57 @@ async fn connect_and_test_agents() {
     assert_eq!(s.agents["a-sh"].node_id.as_deref(), Some(NODE));
     assert_eq!(s.agents["a-missing"].status, AgentStatus::NotConnected);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn interrupted_agent_is_marked_and_a_message_restarts_it() {
+    let tmp = tempfile::tempdir().expect("tmp");
+    let mut state = State::new("ws", "p-owner");
+    state.insert(person("p-owner"));
+    state.insert(membership("m-1", "p-owner", Access::Owner));
+    state.insert(agent(
+        "a-cat",
+        Adapter::Command {
+            command: "cat".into(),
+            args: vec![],
+        },
+        CommandPolicy::Auto,
+    ));
+    state.insert(mission("m-1", MissionMode::Split, "astra/greeting"));
+    let Entity::MissionAgent(mut ma) = mission_agent("ma-1", "m-1", "a-cat", Role::Builder) else {
+        unreachable!()
+    };
+    // Astra stopped while this agent was working.
+    ma.status = MissionAgentStatus::Working;
+    ma.branch = Some("astra/greeting".into());
+    state.insert(Entity::MissionAgent(ma));
+    // Its worktree is still on disk, checked out on the agent's branch.
+    let gitdir = tmp.path().join("gitdir");
+    std::fs::create_dir_all(&gitdir).expect("gitdir");
+    std::fs::write(gitdir.join("HEAD"), "ref: refs/heads/astra/greeting\n").expect("HEAD");
+    let wt = tmp.path().join("worktrees").join("m-1").join("main");
+    std::fs::create_dir_all(&wt).expect("worktree");
+    std::fs::write(wt.join(".git"), format!("gitdir: {}\n", gitdir.display())).expect(".git");
+
+    let host = TestHost::new(state);
+    let orch = orchestrator(host.clone(), tmp.path());
+    orch.recover_interrupted();
+    let s = host.state();
+    assert_eq!(s.mission_agents["ma-1"].status, MissionAgentStatus::Idle);
+    assert_eq!(s.mission_agents["ma-1"].status_detail.as_deref(), Some("interrupted"));
+
+    let send = host.command(
+        &orch,
+        "p-owner",
+        Command::SendMessage {
+            mission_id: "m-1".into(),
+            to: Some("ma-1".into()),
+            body: "keep going".into(),
+        },
+    );
+    wait_for(&host, "the restarted agent answers", |s, _| {
+        s.messages.values().any(|m| m.body.contains("keep going"))
+            && s.mission_agents["ma-1"].status == MissionAgentStatus::Done
+    })
+    .await;
+    assert_eq!(host.result_of(&send), Some((true, None)));
+}

@@ -256,6 +256,7 @@ impl Node {
         for op in lock(&self.inner.store).unexecuted_commands(&self.inner.config.node_id)? {
             orch.submit(&op);
         }
+        orch.recover_interrupted();
         *lock(&self.inner.orchestrator) = Some(orch);
         Ok(())
     }

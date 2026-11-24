@@ -22,6 +22,9 @@ use crate::process::{Supervised, pump_lines};
 
 /// ACP protocol version spoken by this client.
 pub const PROTOCOL_VERSION: u64 = 1;
+/// How long an agent may take to answer `initialize` and `session/new`. Generous, because a bridge run
+/// through npx downloads itself (and the agent CLI it wraps) on first use.
+pub const STARTUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
 /// Default byte limit of terminal output kept.
 pub const TERMINAL_OUTPUT_LIMIT: usize = 1024 * 1024;
 
@@ -122,6 +125,13 @@ impl AgentAdapter for AcpAdapter {
             .map_err(|e| AdapterError::Other(format!("worktree: {e}")))?;
         let (program, args) = crate::process::resolve_program(&self.command, &self.args)
             .map_err(|e| AdapterError::Spawn(self.command.clone(), e))?;
+        // The first activity line: starting can take a while (npx may download the bridge first).
+        let starting = if program.file_stem().is_some_and(|n| n == "npx") {
+            let package = args.get(1).cloned().unwrap_or_else(|| self.command.clone());
+            format!("{package} with npx (the first run downloads it)")
+        } else {
+            self.command.clone()
+        };
         let mut proc = Supervised::spawn(&program.to_string_lossy(), &args, workspace.root())
             .map_err(|e| AdapterError::Spawn(self.command.clone(), e.to_string()))?;
         let (ctl_tx, ctl_rx) = mpsc::unbounded_channel();
@@ -163,6 +173,8 @@ impl AgentAdapter for AcpAdapter {
             pre_approved: AtomicUsize::new(0),
             logged: Mutex::new(HashSet::new()),
         });
+
+        shared.log("start", &starting);
 
         // Reader: responses, requests from the agent, notifications.
         let reader_shared = shared.clone();
@@ -585,6 +597,23 @@ fn exit_signal(_st: &std::process::ExitStatus) -> Option<String> {
     None
 }
 
+/// Adds the last lines the agent wrote to stderr, which usually say why it failed (not signed in, …).
+fn with_stderr(error: String, logs: &crate::process::LogRing) -> String {
+    let lines = logs.lines();
+    let tail: Vec<&str> = lines
+        .iter()
+        .filter_map(|l| l.strip_prefix("stderr: "))
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
+    let tail = &tail[tail.len().saturating_sub(6)..];
+    if tail.is_empty() {
+        error
+    } else {
+        format!("{error}\n\n{}", tail.join("\n"))
+    }
+}
+
 async fn drive(
     s: Arc<Shared>,
     mut proc: Supervised,
@@ -592,6 +621,7 @@ async fn drive(
     reader: tokio::task::JoinHandle<()>,
 ) {
     let result = async {
+        let started = tokio::time::timeout(STARTUP_TIMEOUT, async {
         let init = s
             .rpc
             .request(
@@ -610,7 +640,13 @@ async fn drive(
             .rpc
             .request("session/new", json!({"cwd": s.workspace.root().to_string_lossy(), "mcpServers": []}))
             .await?;
-        let session_id = session["sessionId"].as_str().ok_or("session/new returned no sessionId")?.to_string();
+        session["sessionId"].as_str().map(str::to_string).ok_or_else(|| "session/new returned no sessionId".to_string())
+        })
+        .await;
+        let session_id = match started {
+            Ok(r) => r?,
+            Err(_) => return Err(format!("the agent did not start within {} minutes", STARTUP_TIMEOUT.as_secs() / 60)),
+        };
         let mut prompt = Some(s.ctx.prompt.clone());
         let mut queued: Vec<String> = Vec::new();
         loop {
@@ -658,7 +694,9 @@ async fn drive(
     }
     .await;
     if let Err(e) = result {
-        let _ = s.events.send(AgentEvent::Error(e));
+        let _ = s
+            .events
+            .send(AgentEvent::Error(with_stderr(e, &s.ctx.logs)));
     }
     proc.kill();
     reader.abort();

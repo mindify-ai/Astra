@@ -188,6 +188,40 @@ impl Orchestrator {
             .unwrap_or(false)
     }
 
+    /// Mission agents this node was running when it stopped have lost their sessions: stop showing them as
+    /// working. Sending one a message starts it again (see `send_message`).
+    pub fn recover_interrupted(&self) {
+        let me = self.host().node_id();
+        let ids: Vec<String> = read(self.host(), |s| {
+            s.mission_agents
+                .values()
+                .filter(|ma| ma.status == MissionAgentStatus::Working)
+                .filter(|ma| {
+                    s.missions
+                        .get(&ma.mission_id)
+                        .and_then(|m| m.node_id.as_deref())
+                        == Some(me.as_str())
+                })
+                .map(|ma| ma.id.clone())
+                .collect()
+        });
+        let ops = ids
+            .iter()
+            .filter(|id| !self.is_running(id))
+            .map(|id| {
+                OpBody::patch(
+                    EntityKind::MissionAgent,
+                    id,
+                    [
+                        ("status", json!("idle")),
+                        ("statusDetail", json!("interrupted")),
+                    ],
+                )
+            })
+            .collect();
+        self.emit(ops);
+    }
+
     /// Cancel every running agent.
     pub fn shutdown(&self) {
         if let Ok(agents) = self.inner.agents.lock() {
@@ -469,7 +503,7 @@ impl Orchestrator {
                     )]),
                 }
                 if !self.deliver(ma_id, body) {
-                    return Err(format!("agent {ma_id} is not running"));
+                    self.restart(ma, body)?;
                 }
             }
             None => {
@@ -490,6 +524,65 @@ impl Orchestrator {
             }
         }
         Ok(())
+    }
+
+    /// Starts a new session for an agent that is not running (it finished, failed, or Astra restarted), in its
+    /// mission worktree, with the mission brief and the message it was sent.
+    fn restart(&self, ma: MissionAgent, body: &str) -> CmdResult {
+        let mission = read(self.host(), |s| s.missions.get(&ma.mission_id).cloned())
+            .ok_or_else(|| format!("unknown mission {}", ma.mission_id))?;
+        let worktree = self
+            .worktree_of(&ma)
+            .ok_or_else(|| format!("agent {} is not running and its worktree is gone", ma.id))?;
+        let prompt = format!(
+            "{}\n\nYou were stopped and are now resumed in the same worktree. The person steering you says:\n\n{body}",
+            prompt_for(ma.role, &mission, "")
+        );
+        let o = self.clone();
+        tokio::spawn(async move {
+            if let Err(e) = o.run_turn(&ma, &prompt, &worktree, None).await {
+                o.emit(vec![OpBody::patch(
+                    EntityKind::MissionAgent,
+                    &ma.id,
+                    [
+                        ("status", json!("idle")),
+                        ("statusDetail", json!(format!("error: {e}"))),
+                    ],
+                )]);
+            }
+        });
+        Ok(())
+    }
+
+    /// The worktree a mission agent works in: the one on its branch (or the mission's only worktree).
+    fn worktree_of(&self, ma: &MissionAgent) -> Option<PathBuf> {
+        let dir = self
+            .inner
+            .config
+            .data_dir
+            .join("worktrees")
+            .join(sanitize(&ma.mission_id));
+        let dirs: Vec<PathBuf> = std::fs::read_dir(dir)
+            .ok()?
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|p| p.join(".git").exists())
+            .collect();
+        let on_branch = |wt: &PathBuf| -> Option<String> {
+            let git = std::fs::read_to_string(wt.join(".git")).ok()?;
+            let gitdir = PathBuf::from(git.trim().strip_prefix("gitdir:")?.trim());
+            let head = std::fs::read_to_string(gitdir.join("HEAD")).ok()?;
+            head.trim()
+                .strip_prefix("ref: refs/heads/")
+                .map(str::to_string)
+        };
+        match &ma.branch {
+            Some(b) => dirs
+                .iter()
+                .find(|d| on_branch(d).as_deref() == Some(b.as_str()))
+                .cloned(),
+            None => None,
+        }
+        .or_else(|| (dirs.len() == 1).then(|| dirs[0].clone()))
     }
 
     fn deliver(&self, ma_id: &str, body: &str) -> bool {
