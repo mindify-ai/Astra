@@ -121,16 +121,16 @@ export const colors = {
     "light": "#0A0A0A"
   },
   "selection": {
-    "dark": "#1E4D80",
-    "light": "#B3D4FC"
+    "dark": "#3D8BFD5C",
+    "light": "#3D8BFD47"
   },
   "selection-inactive": {
-    "dark": "#2B3440",
-    "light": "#DCE3EC"
+    "dark": "#8B9BB038",
+    "light": "#5B6B8033"
   },
   "selection-match": {
-    "dark": "#17324F",
-    "light": "#DCEBFD"
+    "dark": "#3D8BFD29",
+    "light": "#3D8BFD1F"
   },
   "window-close": {
     "dark": "#FF5F57",

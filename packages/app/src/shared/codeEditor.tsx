@@ -26,8 +26,9 @@ import {
 import { dockerFile } from '@codemirror/legacy-modes/mode/dockerfile'
 import { shell } from '@codemirror/legacy-modes/mode/shell'
 import { toml } from '@codemirror/legacy-modes/mode/toml'
+import { getChunks, getOriginalDoc, unifiedMergeView } from '@codemirror/merge'
 import { highlightSelectionMatches, search, searchKeymap } from '@codemirror/search'
-import { EditorState, type Extension } from '@codemirror/state'
+import { Compartment, EditorState, type Extension } from '@codemirror/state'
 import {
   crosshairCursor,
   drawSelection,
@@ -177,7 +178,9 @@ export const astraTheme = EditorView.theme({
   '.cm-content': { caretColor: 'var(--ink)', padding: '12px 0' },
   '.cm-line': { padding: '0 16px 0 8px' },
   '.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--ink)', borderLeftWidth: '2px' },
-  // Selection: a clear blue tint (dimmer when the editor isn't focused); text keeps its syntax colour.
+  // Selection: a translucent blue laid over the text (dimmer when the editor isn't focused), so it shows on
+  // every line, diff tints and the active line included, and the text keeps its syntax colour.
+  '.cm-selectionLayer': { zIndex: '1 !important', pointerEvents: 'none' },
   '.cm-selectionBackground': { backgroundColor: 'var(--selection-inactive)' },
   '&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground': {
     backgroundColor: 'var(--selection)',
@@ -189,11 +192,7 @@ export const astraTheme = EditorView.theme({
     borderRight: '1px solid var(--line)',
   },
   '.cm-lineNumbers .cm-gutterElement': { padding: '0 8px 0 16px', minWidth: '32px' },
-  // Hairlines, not a fill: the selection is drawn beneath the lines, and a fill would hide it.
-  '.cm-activeLine': {
-    backgroundColor: 'transparent',
-    boxShadow: 'inset 0 1px var(--line-subtle), inset 0 -1px var(--line-subtle)',
-  },
+  '.cm-activeLine': { backgroundColor: 'var(--surface-alt)' },
   '.cm-activeLineGutter': { backgroundColor: 'var(--surface-alt)', color: 'var(--ink)' },
   '.cm-foldGutter .cm-gutterElement': { padding: '0 4px', cursor: 'pointer' },
   '.cm-foldPlaceholder': {
@@ -261,7 +260,81 @@ export const astraTheme = EditorView.theme({
   },
   '.cm-completionIcon': { opacity: '0.7' },
   '.cm-specialChar': { color: 'var(--danger)' },
+
+  // Diff against the committed copy: added and changed lines green, removed lines red, a bar in the gutter.
+  '&.cm-merge-b .cm-changedLine, .cm-inlineChangedLine': { backgroundColor: 'var(--success-soft)' },
+  '&.cm-merge-b .cm-changedText': { background: 'none', boxShadow: 'inset 0 -2px var(--success)' },
+  '.cm-deletedChunk': { backgroundColor: 'var(--danger-soft)', paddingLeft: '8px' },
+  '.cm-deletedChunk .cm-deletedLine, .cm-deletedLine del': { textDecoration: 'none', opacity: '0.85' },
+  '&.cm-merge-b .cm-deletedText, .cm-deletedChunk .cm-deletedText': {
+    background: 'none',
+    boxShadow: 'inset 0 -2px var(--danger)',
+  },
+  '.cm-changeGutter': { width: '3px', paddingLeft: '0' },
+  '&.cm-merge-b .cm-changedLineGutter': { backgroundColor: 'var(--success)' },
+  '.cm-deletedLineGutter': { backgroundColor: 'var(--danger)' },
+  '.cm-chunkButtons': { position: 'absolute', insetInlineEnd: '12px', zIndex: '2' },
+  '.cm-chunkButtons button': {
+    backgroundColor: 'var(--surface-overlay)',
+    border: '1px solid var(--line-strong)',
+    borderRadius: '0',
+    color: 'var(--ink)',
+    cursor: 'pointer',
+    fontFamily: 'var(--font-sans)',
+    fontSize: '11px',
+    fontWeight: '600',
+    letterSpacing: '0.14em',
+    padding: '1px 8px',
+    textTransform: 'uppercase',
+  },
+  '.cm-chunkButtons button:hover': { backgroundColor: 'var(--invert)', color: 'var(--on-invert)' },
 })
+
+// ── Diff ───────────────────────────────────────────────────────────────────
+
+/** Holds the diff view, so it can be switched on, off, or to another original without a new state. */
+export const diffSlot = new Compartment()
+
+/** The changes against `original`, shown inline. Each changed chunk can be reverted to the original. */
+export function diffExtension(original: string): Extension {
+  return unifiedMergeView({
+    original,
+    highlightChanges: true,
+    gutter: true,
+    syntaxHighlightDeletions: true,
+    mergeControls: (type, action) => {
+      const el = document.createElement(type === 'reject' ? 'button' : 'span')
+      if (type === 'reject') {
+        el.textContent = 'Revert'
+        el.setAttribute('type', 'button')
+        el.title = 'Put this part back as it was'
+        el.onmousedown = action
+      }
+      return el
+    },
+  })
+}
+
+export interface DiffCount {
+  added: number
+  removed: number
+}
+
+const linesIn = (text: string) => (text ? text.split('\n').length - (text.endsWith('\n') ? 1 : 0) : 0)
+
+/** Lines added and removed against the original, or null when the diff is off. */
+export function diffCount(state: EditorState): DiffCount | null {
+  const result = getChunks(state)
+  const original = getOriginalDoc(state)
+  if (!result || !original) return null
+  let added = 0
+  let removed = 0
+  for (const c of result.chunks) {
+    added += linesIn(state.doc.sliceString(c.fromB, Math.min(c.toB, state.doc.length)))
+    removed += linesIn(original.sliceString(c.fromA, Math.min(c.toA, original.length)))
+  }
+  return { added, removed }
+}
 
 /** The editing features every file gets. */
 function baseExtensions(): Extension[] {
@@ -313,6 +386,7 @@ export function createEditorState(text: string, path: string, label: string): Ed
       baseExtensions(),
       languageFor(path).extension(),
       EditorView.contentAttributes.of({ 'aria-label': label }),
+      diffSlot.of([]),
     ],
   })
 }
@@ -331,21 +405,28 @@ export interface Cursor {
 export function CodeEditor({
   path,
   text,
+  original,
   states,
   viewRef,
   onChange,
   onCursor,
+  onDiff,
 }: {
   path: string
   text: string
+  /** The text to colour changes against (null: no diff). */
+  original: string | null
   states: Map<string, EditorState>
   viewRef?: { current: EditorView | null }
   onChange: (text: string) => void
   onCursor: (c: Cursor) => void
+  onDiff?: (d: DiffCount | null) => void
 }) {
   const host = useRef<HTMLDivElement>(null)
-  const callbacks = useRef({ onChange, onCursor })
-  callbacks.current = { onChange, onCursor }
+  const view = useRef<EditorView | null>(null)
+  const applied = useRef<string | null | undefined>(undefined)
+  const callbacks = useRef({ onChange, onCursor, onDiff })
+  callbacks.current = { onChange, onCursor, onDiff }
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: one view per file; later text comes from the view itself
   useEffect(() => {
@@ -359,23 +440,37 @@ export function CodeEditor({
     const cached = states.get(path)
     const state =
       cached && cached.doc.toString() === text ? cached : createEditorState(text, path, `Contents of ${path}`)
-    const view = new EditorView({
+    const v = new EditorView({
       state,
       parent,
-      dispatchTransactions: (trs, v) => {
-        v.update(trs)
-        if (trs.some((tr) => tr.docChanged)) callbacks.current.onChange(v.state.doc.toString())
-        if (trs.some((tr) => tr.selection || tr.docChanged)) report(v)
+      dispatchTransactions: (trs, ev) => {
+        ev.update(trs)
+        if (trs.some((tr) => tr.docChanged)) callbacks.current.onChange(ev.state.doc.toString())
+        if (trs.some((tr) => tr.selection || tr.docChanged)) report(ev)
+        if (trs.some((tr) => tr.docChanged || tr.effects.length > 0))
+          callbacks.current.onDiff?.(diffCount(ev.state))
       },
     })
-    if (viewRef) viewRef.current = view
-    report(view)
+    view.current = v
+    applied.current = undefined
+    if (viewRef) viewRef.current = v
+    report(v)
     return () => {
-      states.set(path, view.state)
-      if (viewRef?.current === view) viewRef.current = null
-      view.destroy()
+      states.set(path, v.state)
+      if (viewRef?.current === v) viewRef.current = null
+      view.current = null
+      v.destroy()
     }
   }, [path])
+
+  // Show the diff against `original` (re-applied when it changes, e.g. after a save without version control).
+  useEffect(() => {
+    const v = view.current
+    if (!v || applied.current === original) return
+    applied.current = original
+    v.dispatch({ effects: diffSlot.reconfigure(original === null ? [] : diffExtension(original)) })
+    callbacks.current.onDiff?.(diffCount(v.state))
+  }, [original, path])
 
   return <div ref={host} className="min-h-0 grow overflow-hidden" />
 }

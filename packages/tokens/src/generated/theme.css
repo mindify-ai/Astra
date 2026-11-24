@@ -32,9 +32,9 @@
   --marking-confidential: #F2B04C;
   --marking-restricted: #FF7A6E;
   --on-marking: #0A0A0A;
-  --selection: #1E4D80;
-  --selection-inactive: #2B3440;
-  --selection-match: #17324F;
+  --selection: #3D8BFD5C;
+  --selection-inactive: #8B9BB038;
+  --selection-match: #3D8BFD29;
   --window-close: #FF5F57;
   --window-minimize: #FEBC2E;
   --window-zoom: #28C840;
@@ -79,9 +79,9 @@
   --marking-confidential: #F2B04C;
   --marking-restricted: #FF7A6E;
   --on-marking: #0A0A0A;
-  --selection: #B3D4FC;
-  --selection-inactive: #DCE3EC;
-  --selection-match: #DCEBFD;
+  --selection: #3D8BFD47;
+  --selection-inactive: #5B6B8033;
+  --selection-match: #3D8BFD1F;
   --window-close: #FF5F57;
   --window-minimize: #FEBC2E;
   --window-zoom: #28C840;
