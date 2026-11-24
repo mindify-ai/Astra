@@ -20,6 +20,7 @@ import { Repo } from './screens/Repo'
 import { Review } from './screens/Review'
 import { Thread } from './screens/Thread'
 import { Welcome } from './screens/Welcome'
+import { CommandPalette } from './shell/CommandPalette'
 import { WithTerminal } from './shell/Terminal'
 
 const rootRoute = createRootRoute({
@@ -29,6 +30,7 @@ const rootRoute = createRootRoute({
         <Outlet />
       </WithTerminal>
       <PeopleDialog />
+      <CommandPalette />
     </>
   ),
 })

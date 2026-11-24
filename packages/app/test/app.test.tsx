@@ -82,6 +82,29 @@ describe('desktop', () => {
     expect(screen.getByText('astra/pricing-cache-b')).toBeTruthy()
   })
 
+  it('the command palette opens with ⌘K, filters, and runs the chosen item', async () => {
+    mount('/')
+    const user = userEvent.setup()
+    await screen.findByRole('heading', { name: 'Start a mission.' })
+    await user.keyboard('{Meta>}k{/Meta}')
+    const search = await screen.findByRole('combobox', { name: /search missions/i })
+    await user.type(search, 'board')
+    const results = screen.getByRole('listbox', { name: 'Results' })
+    expect(within(results).getAllByRole('option')[0]?.textContent).toContain('Board')
+    await user.keyboard('{Enter}')
+    expect(await screen.findByRole('heading', { name: /board/i })).toBeTruthy()
+    expect(screen.queryByRole('combobox', { name: /search missions/i })).toBeNull()
+
+    await user.click(screen.getByRole('button', { name: 'Command palette' }))
+    await user.type(await screen.findByRole('combobox', { name: /search missions/i }), 'Add dark mode')
+    await user.click(
+      within(screen.getByRole('listbox', { name: 'Results' })).getByRole('option', {
+        name: /Start a mission: Add dark mode/,
+      }),
+    )
+    expect(((await screen.findByLabelText('Goal')) as HTMLTextAreaElement).value).toBe('Add dark mode')
+  })
+
   it('opens the people panel from SHARE and changes access', async () => {
     const { client } = mount('/missions/m-014')
     const user = userEvent.setup()

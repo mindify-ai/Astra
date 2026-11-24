@@ -4,6 +4,7 @@ import { Link } from '@tanstack/react-router'
 import { type ReactNode, useEffect, useRef, useState } from 'react'
 import { useAstraState, useConnectivity, useHost, usePlatform, useUi } from '../context'
 import { currentMissionId } from '../select'
+import { PaletteButton } from './CommandPalette'
 import { TerminalButton } from './Terminal'
 
 export type View = 'thread' | 'map' | 'board'
@@ -201,6 +202,7 @@ export function AppHeader({ repoSelect, nav, step, byline, people, actions, bord
       ) : null}
       {byline ? <Spec>{byline}</Spec> : null}
       {people && people.length > 0 ? <AvatarStack people={people} /> : null}
+      <PaletteButton />
       <TerminalButton />
       {actions}
       {windowControls && windowControls !== 'mac' ? (

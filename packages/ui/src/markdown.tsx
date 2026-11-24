@@ -58,7 +58,9 @@ const components: Components = {
     />
   ),
   ol: ({ node: _, ...p }) => <ol className="my-2 list-decimal pl-5" {...p} />,
-  li: ({ node: _, ...p }) => <li className="my-0.5 [&>input]:mr-2 [&>input]:align-middle" {...p} />,
+  li: ({ node: _, ...p }) => (
+    <li className="my-0.5 [&>input]:mr-2 [&>input]:align-middle [&>input]:accent-signal" {...p} />
+  ),
   a: ({ node: _, ...p }) => (
     <a
       className="text-signal underline underline-offset-2"

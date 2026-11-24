@@ -105,6 +105,8 @@ interface UiState {
   openShare: (missionId: string | null) => void
   terminalOpen: boolean
   setTerminalOpen: (open: boolean) => void
+  paletteOpen: boolean
+  setPaletteOpen: (open: boolean) => void
 }
 
 const UiContext = createContext<UiState | null>(null)
@@ -163,6 +165,7 @@ export function AstraProvider({
   const [lastMissionId, setLast] = useState(() => read('astra.lastMission'))
   const [shareMissionId, openShare] = useState<string | null>(null)
   const [terminalOpen, setTerminalOpen] = useState(false)
+  const [paletteOpen, setPaletteOpen] = useState(false)
   const ui = useMemo<UiState>(
     () => ({
       repoId,
@@ -179,8 +182,10 @@ export function AstraProvider({
       openShare,
       terminalOpen,
       setTerminalOpen,
+      paletteOpen,
+      setPaletteOpen,
     }),
-    [repoId, lastMissionId, shareMissionId, terminalOpen],
+    [repoId, lastMissionId, shareMissionId, terminalOpen, paletteOpen],
   )
 
   return (
