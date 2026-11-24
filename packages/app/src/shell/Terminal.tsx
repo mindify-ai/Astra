@@ -1,5 +1,5 @@
 import type { TerminalHost, TerminalSession } from '@astra/client'
-import { buttonClass, CloseIcon, cx, Eyebrow } from '@astra/ui'
+import { buttonClass, CloseIcon, cx, Eyebrow, ResizeHandle, useResizable } from '@astra/ui'
 import '@xterm/xterm/css/xterm.css'
 import { type ReactNode, useEffect, useRef, useState } from 'react'
 import { useAstraState, useHost, usePlatform, useUi } from '../context'
@@ -58,6 +58,19 @@ interface Tab {
   cwd: string | null
 }
 
+/** The dock may grow to 80% of the window; tracked so shrinking the window shrinks the dock with it. */
+const maxDockHeight = () => Math.round((typeof window === 'undefined' ? 900 : window.innerHeight) * 0.8)
+
+function useMaxDockHeight() {
+  const [max, setMax] = useState(maxDockHeight)
+  useEffect(() => {
+    const onResize = () => setMax(maxDockHeight())
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
+  return max
+}
+
 function TerminalDock({ host, open, onHide }: { host: TerminalHost; open: boolean; onHide: () => void }) {
   const s = useAstraState()
   const ui = useUi()
@@ -66,6 +79,16 @@ function TerminalDock({ host, open, onHide }: { host: TerminalHost; open: boolea
   const [tabs, setTabs] = useState<Tab[]>([])
   const [active, setActive] = useState<number | null>(null)
   const next = useRef(1)
+  const maxHeight = useMaxDockHeight()
+  // The xterm views refit themselves through their ResizeObserver as the height changes.
+  const [height, resize] = useResizable({
+    storageKey: 'astra.size.terminal',
+    initial: 360,
+    min: 120,
+    max: Math.max(120, maxHeight),
+    axis: 'y',
+    invert: true,
+  })
 
   const add = () => {
     const tab = { key: next.current++, cwd }
@@ -91,8 +114,10 @@ function TerminalDock({ host, open, onHide }: { host: TerminalHost; open: boolea
     <section
       aria-label="Terminal"
       hidden={!open}
-      className="flex h-[min(360px,45dvh)] shrink-0 flex-col border-t border-line-strong bg-surface"
+      style={{ height }}
+      className="relative flex max-h-[80dvh] shrink-0 flex-col border-t border-line-strong bg-surface"
     >
+      <ResizeHandle {...resize} label="Resize terminal" />
       <div className="flex h-9 shrink-0 items-center gap-1 border-b border-line px-3">
         <Eyebrow as="h2" className="mr-3">
           Terminal

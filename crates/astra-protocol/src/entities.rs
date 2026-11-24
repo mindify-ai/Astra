@@ -228,6 +228,21 @@ pub struct MissionAgent {
     pub started_at: Option<String>,
     pub branch: Option<String>,
     pub latest: Vec<LogLine>,
+    /// The custom agent type this agent was added as (its instructions join the role's brief).
+    #[serde(default)]
+    pub agent_type_id: Option<String>,
+}
+
+/// A custom agent type: a base role on a default agent (vendor or harness), with its own instructions
+/// ("Security reviewer" = reviewer on Codex, told to look for injection bugs).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentType {
+    pub id: String,
+    pub name: String,
+    pub role: Role,
+    pub agent_id: String,
+    pub instructions: String,
 }
 
 /// A board task.
@@ -336,12 +351,12 @@ pub struct Presence {
 
 string_enum!(
     /// Discriminant of [`Entity`] (the `kind` field / `entityKind` in ops).
-    EntityKind { Person, Repository, Agent, Mission, MissionAgent, Task, Message, Approval, Result, Merge, Membership }
+    EntityKind { Person, Repository, Agent, Mission, MissionAgent, Task, Message, Approval, Result, Merge, Membership, AgentType }
 );
 
 impl EntityKind {
     /// All kinds.
-    pub const ALL: [EntityKind; 11] = [
+    pub const ALL: [EntityKind; 12] = [
         EntityKind::Person,
         EntityKind::Repository,
         EntityKind::Agent,
@@ -353,6 +368,7 @@ impl EntityKind {
         EntityKind::Result,
         EntityKind::Merge,
         EntityKind::Membership,
+        EntityKind::AgentType,
     ];
 
     /// The wire string (`"missionAgent"`).
@@ -369,6 +385,7 @@ impl EntityKind {
             EntityKind::Result => "result",
             EntityKind::Merge => "merge",
             EntityKind::Membership => "membership",
+            EntityKind::AgentType => "agentType",
         }
     }
 
@@ -399,6 +416,7 @@ pub enum Entity {
     Result(MissionResult),
     Merge(Merge),
     Membership(Membership),
+    AgentType(AgentType),
 }
 
 impl Entity {
@@ -416,6 +434,7 @@ impl Entity {
             Entity::Result(_) => EntityKind::Result,
             Entity::Merge(_) => EntityKind::Merge,
             Entity::Membership(_) => EntityKind::Membership,
+            Entity::AgentType(_) => EntityKind::AgentType,
         }
     }
 
@@ -433,6 +452,7 @@ impl Entity {
             Entity::Result(e) => &e.id,
             Entity::Merge(e) => &e.id,
             Entity::Membership(e) => &e.id,
+            Entity::AgentType(e) => &e.id,
         }
     }
 
@@ -478,4 +498,5 @@ entity_from!(
     MissionResult => Result,
     Merge => Merge,
     Membership => Membership,
+    AgentType => AgentType,
 );

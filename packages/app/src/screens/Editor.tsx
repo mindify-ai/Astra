@@ -6,9 +6,11 @@ import {
   cx,
   Data,
   Eyebrow,
+  ResizeHandle,
   Spec,
   SpecStatus,
   TextInput,
+  useResizable,
 } from '@astra/ui'
 import { Link } from '@tanstack/react-router'
 import {
@@ -184,6 +186,13 @@ function Workspace({
   const [armedClose, setArmedClose] = useState<string | null>(null)
   const [cursor, setCursor] = useState({ line: 1, col: 1 })
   const [find, setFind] = useState<{ query: string; index: number } | null>(null)
+  const [explorerWidth, explorerHandle] = useResizable({
+    storageKey: 'astra.size.editor.explorer',
+    initial: 260,
+    min: 180,
+    max: 560,
+    axis: 'x',
+  })
   const requested = useRef(new Set<string>())
   const docsRef = useRef(docs)
   docsRef.current = docs
@@ -290,8 +299,10 @@ function Workspace({
     <main className="flex min-h-0 grow">
       <aside
         aria-label="Explorer"
-        className="box-border flex w-[260px] shrink-0 flex-col border-r border-line bg-surface-alt"
+        style={{ width: explorerWidth }}
+        className="relative box-border flex shrink-0 flex-col border-r border-line bg-surface-alt"
       >
+        <ResizeHandle {...explorerHandle} label="Resize explorer" />
         <div className="flex h-9 shrink-0 items-center gap-3 border-b border-line px-4">
           <Eyebrow as="h2">Explorer</Eyebrow>
           <Spec className="truncate" title={root}>

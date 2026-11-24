@@ -50,6 +50,20 @@ pub enum Command {
     TestAgent {
         agent_id: String,
     },
+    /// Run a mission agent's role on a different connected agent (another vendor or harness). A running
+    /// session is stopped and its task handed over in the same worktree.
+    SwitchAgent {
+        mission_agent_id: String,
+        agent_id: String,
+    },
+    /// Start a mission agent the client just put on a mission that is already under way.
+    AddAgent {
+        mission_agent_id: String,
+    },
+    /// Take an agent off its mission: its session stops and the mission carries on without it.
+    RemoveAgent {
+        mission_agent_id: String,
+    },
 }
 
 /// The payload of an op (tagged by `type`).

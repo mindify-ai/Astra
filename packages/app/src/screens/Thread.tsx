@@ -6,10 +6,12 @@ import {
   Eyebrow,
   formatDiffStats,
   inlineLinkClass,
+  ResizeHandle,
   Select,
   Spec,
   SpecStatus,
   Status,
+  useResizable,
 } from '@astra/ui'
 import { Link } from '@tanstack/react-router'
 import { useEffect, useRef, useState } from 'react'
@@ -39,6 +41,13 @@ export function Thread({ missionId }: { missionId: string }) {
   const [to, setTo] = useState<string>('all')
   const [draft, setDraft] = useState('')
   const [sendError, setSendError] = useState<string | null>(null)
+  const [asideWidth, asideHandle] = useResizable({
+    storageKey: 'astra.size.thread.aside',
+    initial: 240,
+    min: 200,
+    max: 520,
+    axis: 'x',
+  })
   const listEnd = useRef<HTMLDivElement>(null)
   const messages = messagesOf(s, missionId)
   useMissionPresence(missionId, 'Watching the thread')
@@ -85,7 +94,11 @@ export function Thread({ missionId }: { missionId: string }) {
       }
     >
       <div className="flex grow flex-wrap">
-        <aside className="box-border flex flex-[1_1_240px] flex-col gap-8 border-r border-line bg-surface-alt px-3 py-6">
+        <aside
+          style={{ flexBasis: asideWidth }}
+          className="relative box-border flex flex-[1_1_240px] flex-col gap-8 border-r border-line bg-surface-alt px-3 py-6"
+        >
+          <ResizeHandle {...asideHandle} label="Resize sidebar" />
           <section className="flex flex-col gap-2">
             <Eyebrow as="h2" className="px-3">
               Missions

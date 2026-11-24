@@ -17,9 +17,11 @@ import {
   formatDiffStats,
   inlineLinkClass,
   Markdown,
+  ResizeHandle,
   Spec,
   Status,
   TextArea,
+  useResizable,
 } from '@astra/ui'
 import { Link, useNavigate } from '@tanstack/react-router'
 import { Fragment, type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
@@ -442,6 +444,13 @@ function ReviewBody({ missionId, result }: { missionId: string; result: RaceResu
   const [viewed, setViewed] = useViewed(result.id)
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set(viewed))
   const [layout, setLayout] = useState<Layout>('unified')
+  const [filesWidth, filesHandle] = useResizable({
+    storageKey: 'astra.size.review.files',
+    initial: 300,
+    min: 200,
+    max: 600,
+    axis: 'x',
+  })
   const [active, setActive] = useState(0)
   const [composer, setComposer] = useState<string | null>(null)
   const [requesting, setRequesting] = useState(false)
@@ -617,8 +626,10 @@ function ReviewBody({ missionId, result }: { missionId: string; result: RaceResu
       <div className="flex grow">
         <aside
           aria-label="Files"
-          className="sticky top-0 box-border flex w-[300px] shrink-0 flex-col gap-3 self-start border-r border-line bg-surface-alt px-3 py-6"
+          style={{ width: filesWidth }}
+          className="sticky top-0 box-border flex shrink-0 flex-col gap-3 self-start border-r border-line bg-surface-alt px-3 py-6"
         >
+          <ResizeHandle {...filesHandle} label="Resize file list" />
           <div className="flex items-baseline justify-between gap-2 px-2">
             <Eyebrow as="h2" className="m-0">
               Files · {files.length}

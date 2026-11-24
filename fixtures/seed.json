@@ -22,10 +22,24 @@
     }
   ],
   "entities": [
-    { "kind": "person", "id": "p-mark", "name": "Mark", "initials": "MC" },
-    { "kind": "person", "id": "p-lin", "name": "Lin", "initials": "LY" },
-    { "kind": "person", "id": "p-jo", "name": "Jo", "initials": "JK" },
-
+    {
+      "kind": "person",
+      "id": "p-mark",
+      "name": "Mark",
+      "initials": "MC"
+    },
+    {
+      "kind": "person",
+      "id": "p-lin",
+      "name": "Lin",
+      "initials": "LY"
+    },
+    {
+      "kind": "person",
+      "id": "p-jo",
+      "name": "Jo",
+      "initials": "JK"
+    },
     {
       "kind": "repository",
       "id": "r-gateway",
@@ -71,7 +85,6 @@
       "path": "~/code/experiments",
       "remoteUrl": null
     },
-
     {
       "kind": "agent",
       "id": "a-claude-code",
@@ -79,7 +92,11 @@
       "vendor": "ANTHROPIC",
       "category": "codingAgent",
       "transport": "CLI on this machine",
-      "adapter": { "type": "acp", "command": "claude-agent-acp", "args": [] },
+      "adapter": {
+        "type": "acp",
+        "command": "claude-agent-acp",
+        "args": []
+      },
       "runsOn": "local",
       "nodeId": "n-mark-desktop",
       "commandPolicy": "askMe",
@@ -93,7 +110,11 @@
       "vendor": "OPENAI",
       "category": "codingAgent",
       "transport": "CLI on this machine",
-      "adapter": { "type": "acp", "command": "codex-acp", "args": [] },
+      "adapter": {
+        "type": "acp",
+        "command": "codex-acp",
+        "args": []
+      },
       "runsOn": "local",
       "nodeId": "n-mark-desktop",
       "commandPolicy": "askMe",
@@ -107,7 +128,11 @@
       "vendor": "GOOGLE",
       "category": "codingAgent",
       "transport": "CLI on this machine",
-      "adapter": { "type": "acp", "command": "gemini", "args": ["--experimental-acp"] },
+      "adapter": {
+        "type": "acp",
+        "command": "gemini",
+        "args": ["--experimental-acp"]
+      },
       "runsOn": "local",
       "nodeId": "n-mark-desktop",
       "commandPolicy": "askMe",
@@ -149,7 +174,11 @@
       "vendor": "LANGCHAIN",
       "category": "harness",
       "transport": "Endpoint",
-      "adapter": { "type": "langgraph", "endpoint": "http://localhost:2024", "graph": "qa-graph" },
+      "adapter": {
+        "type": "langgraph",
+        "endpoint": "http://localhost:2024",
+        "graph": "qa-graph"
+      },
       "runsOn": "local",
       "nodeId": "n-mark-desktop",
       "commandPolicy": "askMe",
@@ -247,14 +276,17 @@
       "vendor": "MINDIFY AI",
       "category": "local",
       "transport": "Claude online, local model offline",
-      "adapter": { "type": "builtin", "provider": "auto", "model": null },
+      "adapter": {
+        "type": "builtin",
+        "provider": "auto",
+        "model": null
+      },
       "runsOn": "local",
       "nodeId": null,
       "commandPolicy": "askMe",
       "status": "notConnected",
       "requiresNetwork": false
     },
-
     {
       "kind": "mission",
       "id": "m-014",
@@ -270,7 +302,11 @@
       "approvalPolicy": "owner",
       "ownerId": "p-mark",
       "nodeId": "n-mark-desktop",
-      "stats": { "files": 4, "additions": 182, "deletions": 24 },
+      "stats": {
+        "files": 4,
+        "additions": 182,
+        "deletions": 24
+      },
       "createdAt": "2026-11-21T09:12:00Z"
     },
     {
@@ -309,7 +345,6 @@
       "stats": null,
       "createdAt": "2026-11-20T15:00:00Z"
     },
-
     {
       "kind": "membership",
       "id": "m-014:p-mark",
@@ -324,7 +359,13 @@
       "personId": "p-lin",
       "access": "steer"
     },
-    { "kind": "membership", "id": "m-014:p-jo", "missionId": "m-014", "personId": "p-jo", "access": "watch" },
+    {
+      "kind": "membership",
+      "id": "m-014:p-jo",
+      "missionId": "m-014",
+      "personId": "p-jo",
+      "access": "watch"
+    },
     {
       "kind": "membership",
       "id": "m-015:p-mark",
@@ -346,7 +387,6 @@
       "personId": "p-mark",
       "access": "owner"
     },
-
     {
       "kind": "missionAgent",
       "id": "ma-014-planner",
@@ -360,7 +400,8 @@
       "task": "Plan the rate limiter",
       "startedAt": "2026-11-21T09:13:00Z",
       "branch": "astra/rate-limit",
-      "latest": []
+      "latest": [],
+      "agentTypeId": null
     },
     {
       "kind": "missionAgent",
@@ -376,10 +417,20 @@
       "startedAt": "2026-11-21T09:16:00Z",
       "branch": "astra/rate-limit",
       "latest": [
-        { "verb": "edit", "target": "src/limiter/bucket.ts" },
-        { "verb": "edit", "target": "src/middleware/rate-limit.ts" },
-        { "verb": "run", "target": "pnpm test limiter" }
-      ]
+        {
+          "verb": "edit",
+          "target": "src/limiter/bucket.ts"
+        },
+        {
+          "verb": "edit",
+          "target": "src/middleware/rate-limit.ts"
+        },
+        {
+          "verb": "run",
+          "target": "pnpm test limiter"
+        }
+      ],
+      "agentTypeId": null
     },
     {
       "kind": "missionAgent",
@@ -394,7 +445,8 @@
       "task": "Run the integration tests",
       "startedAt": "2026-11-21T09:21:00Z",
       "branch": "astra/rate-limit",
-      "latest": []
+      "latest": [],
+      "agentTypeId": null
     },
     {
       "kind": "missionAgent",
@@ -409,9 +461,9 @@
       "task": "Review the limiter diff",
       "startedAt": null,
       "branch": "astra/rate-limit",
-      "latest": []
+      "latest": [],
+      "agentTypeId": null
     },
-
     {
       "kind": "missionAgent",
       "id": "ma-015-builder-a",
@@ -425,7 +477,8 @@
       "task": "Cache the pricing endpoint",
       "startedAt": "2026-11-21T09:41:00Z",
       "branch": "astra/pricing-cache-a",
-      "latest": []
+      "latest": [],
+      "agentTypeId": null
     },
     {
       "kind": "missionAgent",
@@ -440,7 +493,8 @@
       "task": "Cache the pricing endpoint",
       "startedAt": "2026-11-21T09:41:00Z",
       "branch": "astra/pricing-cache-b",
-      "latest": []
+      "latest": [],
+      "agentTypeId": null
     },
     {
       "kind": "missionAgent",
@@ -455,9 +509,9 @@
       "task": "Compare the two results",
       "startedAt": "2026-11-21T10:00:00Z",
       "branch": null,
-      "latest": []
+      "latest": [],
+      "agentTypeId": null
     },
-
     {
       "kind": "missionAgent",
       "id": "ma-013-writer",
@@ -471,9 +525,9 @@
       "task": "Refresh the onboarding docs",
       "startedAt": "2026-11-20T15:01:00Z",
       "branch": "astra/onboarding-docs",
-      "latest": []
+      "latest": [],
+      "agentTypeId": null
     },
-
     {
       "kind": "approval",
       "id": "ap-0042",
@@ -485,12 +539,14 @@
       "decidedBy": null,
       "decidedAt": null
     },
-
     {
       "kind": "message",
       "id": "msg-014-1",
       "missionId": "m-014",
-      "author": { "type": "person", "personId": "p-mark" },
+      "author": {
+        "type": "person",
+        "personId": "p-mark"
+      },
       "steering": null,
       "to": null,
       "body": "Add token-bucket rate limiting to the gateway. Keep the public API unchanged.",
@@ -503,14 +559,26 @@
       "kind": "message",
       "id": "msg-014-2",
       "missionId": "m-014",
-      "author": { "type": "agent", "missionAgentId": "ma-014-planner" },
+      "author": {
+        "type": "agent",
+        "missionAgentId": "ma-014-planner"
+      },
       "steering": null,
       "to": null,
       "body": "Three steps. Builder writes the limiter while Tester prepares the integration tests.",
       "plan": [
-        { "text": "Read the gateway middleware", "state": "done" },
-        { "text": "Draft the limiter interface", "state": "done" },
-        { "text": "Build and test in parallel, handed to Builder and Tester", "state": "active" }
+        {
+          "text": "Read the gateway middleware",
+          "state": "done"
+        },
+        {
+          "text": "Draft the limiter interface",
+          "state": "done"
+        },
+        {
+          "text": "Build and test in parallel, handed to Builder and Tester",
+          "state": "active"
+        }
       ],
       "log": [],
       "approvalId": null,
@@ -520,15 +588,27 @@
       "kind": "message",
       "id": "msg-014-3",
       "missionId": "m-014",
-      "author": { "type": "agent", "missionAgentId": "ma-014-builder" },
+      "author": {
+        "type": "agent",
+        "missionAgentId": "ma-014-builder"
+      },
       "steering": null,
       "to": null,
       "body": "Writing the limiter. Two of four files done.",
       "plan": [],
       "log": [
-        { "verb": "edit", "target": "src/limiter/bucket.ts" },
-        { "verb": "edit", "target": "src/middleware/rate-limit.ts" },
-        { "verb": "run", "target": "pnpm test limiter" }
+        {
+          "verb": "edit",
+          "target": "src/limiter/bucket.ts"
+        },
+        {
+          "verb": "edit",
+          "target": "src/middleware/rate-limit.ts"
+        },
+        {
+          "verb": "run",
+          "target": "pnpm test limiter"
+        }
       ],
       "approvalId": null,
       "at": "2026-11-21T09:16:00Z"
@@ -537,7 +617,10 @@
       "kind": "message",
       "id": "msg-014-4",
       "missionId": "m-014",
-      "author": { "type": "person", "personId": "p-lin" },
+      "author": {
+        "type": "person",
+        "personId": "p-lin"
+      },
       "steering": "ma-014-builder",
       "to": "ma-014-builder",
       "body": "Use the Redis store we already have, not an in-memory map.",
@@ -550,7 +633,10 @@
       "kind": "message",
       "id": "msg-014-5",
       "missionId": "m-014",
-      "author": { "type": "agent", "missionAgentId": "ma-014-tester" },
+      "author": {
+        "type": "agent",
+        "missionAgentId": "ma-014-tester"
+      },
       "steering": null,
       "to": null,
       "body": "I need to run migration 0042 on staging before the integration tests. Approve?",
@@ -559,12 +645,14 @@
       "approvalId": "ap-0042",
       "at": "2026-11-21T09:21:00Z"
     },
-
     {
       "kind": "message",
       "id": "msg-015-1",
       "missionId": "m-015",
-      "author": { "type": "person", "personId": "p-mark" },
+      "author": {
+        "type": "person",
+        "personId": "p-mark"
+      },
       "steering": null,
       "to": null,
       "body": "Cache the pricing endpoint.",
@@ -577,7 +665,10 @@
       "kind": "message",
       "id": "msg-015-2",
       "missionId": "m-015",
-      "author": { "type": "agent", "missionAgentId": "ma-015-reviewer" },
+      "author": {
+        "type": "agent",
+        "missionAgentId": "ma-015-reviewer"
+      },
       "steering": null,
       "to": null,
       "body": "Both pass the tests. A changes fewer files and keeps the handler as it is. B adds a small cache helper you could reuse on other endpoints. I would merge A now and keep B as a follow-up.",
@@ -586,12 +677,14 @@
       "approvalId": null,
       "at": "2026-11-21T10:02:00Z"
     },
-
     {
       "kind": "message",
       "id": "msg-013-1",
       "missionId": "m-013",
-      "author": { "type": "person", "personId": "p-mark" },
+      "author": {
+        "type": "person",
+        "personId": "p-mark"
+      },
       "steering": null,
       "to": null,
       "body": "Refresh the onboarding docs.",
@@ -600,7 +693,6 @@
       "approvalId": null,
       "at": "2026-11-20T15:00:00Z"
     },
-
     {
       "kind": "result",
       "id": "res-015-a",
@@ -608,21 +700,49 @@
       "label": "A",
       "missionAgentId": "ma-015-builder-a",
       "branch": "astra/pricing-cache-a",
-      "stats": { "files": 2, "additions": 38, "deletions": 6 },
+      "stats": {
+        "files": 2,
+        "additions": 38,
+        "deletions": 6
+      },
       "checks": "passed",
       "reviewerPick": true,
       "diff": [
         {
           "path": "src/pricing/handler.ts",
           "lines": [
-            { "kind": "ctx", "text": "export async function getPricing() {" },
-            { "kind": "del", "text": "  return db.pricing.all()" },
-            { "kind": "add", "text": "  const hit = await cache.get('pricing')" },
-            { "kind": "add", "text": "  if (hit) return hit" },
-            { "kind": "add", "text": "  const rows = await db.pricing.all()" },
-            { "kind": "add", "text": "  await cache.set('pricing', rows, 60)" },
-            { "kind": "add", "text": "  return rows" },
-            { "kind": "ctx", "text": "}" }
+            {
+              "kind": "ctx",
+              "text": "export async function getPricing() {"
+            },
+            {
+              "kind": "del",
+              "text": "  return db.pricing.all()"
+            },
+            {
+              "kind": "add",
+              "text": "  const hit = await cache.get('pricing')"
+            },
+            {
+              "kind": "add",
+              "text": "  if (hit) return hit"
+            },
+            {
+              "kind": "add",
+              "text": "  const rows = await db.pricing.all()"
+            },
+            {
+              "kind": "add",
+              "text": "  await cache.set('pricing', rows, 60)"
+            },
+            {
+              "kind": "add",
+              "text": "  return rows"
+            },
+            {
+              "kind": "ctx",
+              "text": "}"
+            }
           ]
         }
       ]
@@ -634,41 +754,74 @@
       "label": "B",
       "missionAgentId": "ma-015-builder-b",
       "branch": "astra/pricing-cache-b",
-      "stats": { "files": 4, "additions": 71, "deletions": 9 },
+      "stats": {
+        "files": 4,
+        "additions": 71,
+        "deletions": 9
+      },
       "checks": "passed",
       "reviewerPick": false,
       "diff": [
         {
           "path": "src/cache/cached.ts",
           "lines": [
-            { "kind": "add", "text": "export function cached(key, ttl, load) {" },
-            { "kind": "add", "text": "  return async () => {" },
-            { "kind": "add", "text": "    const hit = await cache.get(key)" },
-            { "kind": "add", "text": "    if (hit) return hit" },
-            { "kind": "add", "text": "    const value = await load()" },
-            { "kind": "add", "text": "    await cache.set(key, value, ttl)" },
-            { "kind": "add", "text": "    return value" },
-            { "kind": "add", "text": "  }" },
-            { "kind": "add", "text": "}" }
+            {
+              "kind": "add",
+              "text": "export function cached(key, ttl, load) {"
+            },
+            {
+              "kind": "add",
+              "text": "  return async () => {"
+            },
+            {
+              "kind": "add",
+              "text": "    const hit = await cache.get(key)"
+            },
+            {
+              "kind": "add",
+              "text": "    if (hit) return hit"
+            },
+            {
+              "kind": "add",
+              "text": "    const value = await load()"
+            },
+            {
+              "kind": "add",
+              "text": "    await cache.set(key, value, ttl)"
+            },
+            {
+              "kind": "add",
+              "text": "    return value"
+            },
+            {
+              "kind": "add",
+              "text": "  }"
+            },
+            {
+              "kind": "add",
+              "text": "}"
+            }
           ]
         }
       ]
     },
-
     {
       "kind": "merge",
       "id": "m-013",
       "missionId": "m-013",
       "resultId": null,
       "into": "mindify-ai/gateway · main",
-      "stats": { "files": 3, "additions": 120, "deletions": 41 },
+      "stats": {
+        "files": 3,
+        "additions": 120,
+        "deletions": 41
+      },
       "checks": "passed",
       "approvedBy": "p-mark",
       "note": null,
       "keptBranches": [],
       "at": "2026-11-20T16:10:00Z"
     },
-
     {
       "kind": "task",
       "id": "t-014-review",
@@ -759,6 +912,14 @@
       "mergedBy": "p-mark",
       "approvalId": null,
       "order": 2
+    },
+    {
+      "kind": "agentType",
+      "id": "at-security-reviewer",
+      "name": "Security reviewer",
+      "role": "reviewer",
+      "agentId": "a-codex",
+      "instructions": "Review for security first: injection, authentication and authorization gaps, secrets in code, unsafe defaults. Name the file and line for each finding and say how to fix it."
     }
   ]
 }

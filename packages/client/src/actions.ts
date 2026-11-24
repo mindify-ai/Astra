@@ -1,6 +1,18 @@
 import { ulid } from './hlc'
 import type { AstraClient, CommandOutcome } from './store'
-import type { Access, Command, Entity, Id, MissionAgent, MissionMode, Op, OpBody, Role, State } from './types'
+import type {
+  Access,
+  AgentType,
+  Command,
+  Entity,
+  Id,
+  MissionAgent,
+  MissionMode,
+  Op,
+  OpBody,
+  Role,
+  State,
+} from './types'
 
 /** Runner node that executes commands for a mission. Falls back to the local desktop node id. */
 export function nodeForMission(state: State, missionId: Id): Id {
@@ -31,7 +43,7 @@ export interface MissionDraft {
   repoId: Id
   baseBranch: string
   branch?: string
-  agents: { agentId: Id; role: Role; enabled: boolean }[]
+  agents: { agentId: Id; role: Role; enabled: boolean; agentTypeId?: Id | null }[]
   people?: { personId: Id; access: Access }[]
   nodeId?: Id
 }
@@ -85,6 +97,7 @@ export async function createMission(client: AstraClient, draft: MissionDraft): P
         startedAt: null,
         branch: null,
         latest: [],
+        agentTypeId: a.agentTypeId ?? null,
       }),
     ),
     { kind: 'membership', id: `${id}:${state.me}`, missionId: id, personId: state.me, access: 'owner' },
@@ -178,6 +191,88 @@ export function agentCommand(
   const ma = state.missionAgents[missionAgentId]
   if (!ma) return Promise.resolve([])
   return client.submit([command(nodeForMission(state, ma.missionId), { type, missionAgentId })])
+}
+
+/** Runs a mission agent's role on another connected agent (vendor or harness); resolves with the node's answer. */
+export async function switchAgent(
+  client: AstraClient,
+  missionAgentId: Id,
+  agentId: Id,
+): Promise<CommandOutcome | null> {
+  const state = client.getState()
+  const ma = state.missionAgents[missionAgentId]
+  if (!ma) return null
+  const ops = await client.submit([
+    command(nodeForMission(state, ma.missionId), { type: 'switchAgent', missionAgentId, agentId }),
+  ])
+  return outcomeOf(client, ops)
+}
+
+/** Puts a new agent on a mission in `role`, then asks the node to start it if the mission is under way. */
+export async function addAgent(
+  client: AstraClient,
+  missionId: Id,
+  role: Role,
+  agentId: Id,
+  agentTypeId: Id | null = null,
+): Promise<{ missionAgentId: Id; outcome: CommandOutcome | null }> {
+  const state = client.getState()
+  const missionAgentId = `${missionId}-ma-${ulid().slice(-6).toLowerCase()}`
+  const entity: MissionAgent = {
+    kind: 'missionAgent',
+    id: missionAgentId,
+    missionId,
+    agentId,
+    role,
+    enabled: true,
+    status: 'queued',
+    statusDetail: null,
+    steeredBy: null,
+    task: null,
+    startedAt: null,
+    branch: null,
+    latest: [],
+    agentTypeId,
+  }
+  const ops = await client.submit([
+    { type: 'put', entity },
+    command(nodeForMission(state, missionId), { type: 'addAgent', missionAgentId }),
+  ])
+  return { missionAgentId, outcome: await outcomeOf(client, ops) }
+}
+
+/** Saves a custom agent type (a base role on a default agent, with its own instructions). Returns its id. */
+export async function saveAgentType(
+  client: AstraClient,
+  draft: { id?: Id; name: string; role: Role; agentId: Id; instructions: string },
+): Promise<Id> {
+  const id = draft.id ?? `at-${slugify(draft.name, 24) || 'type'}-${ulid().slice(-6).toLowerCase()}`
+  const entity: AgentType = {
+    kind: 'agentType',
+    id,
+    name: draft.name.trim(),
+    role: draft.role,
+    agentId: draft.agentId,
+    instructions: draft.instructions.trim(),
+  }
+  await client.submit([{ type: 'put', entity }])
+  return id
+}
+
+/** Deletes a custom agent type. Agents already added as this type keep their role and agent. */
+export function deleteAgentType(client: AstraClient, agentTypeId: Id) {
+  return client.submit([{ type: 'delete', entityKind: 'agentType', id: agentTypeId }])
+}
+
+/** Takes an agent off its mission; resolves with the node's answer. */
+export async function removeAgent(client: AstraClient, missionAgentId: Id): Promise<CommandOutcome | null> {
+  const state = client.getState()
+  const ma = state.missionAgents[missionAgentId]
+  if (!ma) return null
+  const ops = await client.submit([
+    command(nodeForMission(state, ma.missionId), { type: 'removeAgent', missionAgentId }),
+  ])
+  return outcomeOf(client, ops)
 }
 
 /** Saves an agent's setup and asks its node to connect it; resolves with the node's answer. */

@@ -1,6 +1,7 @@
 import type {
   AgentConnection,
   AgentRunStatus,
+  AgentType,
   Id,
   Mission,
   MissionAgent,
@@ -28,6 +29,32 @@ export const roleVerb: Record<Role, string> = {
   writer: 'Writes',
 }
 export const roleLetter = (r: Role) => roleName[r].charAt(0)
+
+/** Every role, in pipeline order. */
+export const roles: Role[] = ['planner', 'builder', 'tester', 'reviewer', 'writer']
+
+/** Custom agent types, by name. */
+export function agentTypes(s: State): AgentType[] {
+  return Object.values(s.agentTypes).sort((a, b) => a.name.localeCompare(b.name))
+}
+
+/** Names for a mission's agents, numbered when one name repeats ("Builder", "Builder 2"): the same agent
+ * (vendor or harness) may fill several roles, or the same role twice. */
+export function agentNames(s: State, agents: MissionAgent[]): Record<Id, string> {
+  const seen: Record<string, number> = {}
+  const out: Record<Id, string> = {}
+  for (const ma of agents) {
+    const base = missionAgentName(s, ma)
+    seen[base] = (seen[base] ?? 0) + 1
+    out[ma.id] = seen[base] > 1 ? `${base} ${seen[base]}` : base
+  }
+  return out
+}
+
+/** What a mission agent is called: its custom type's name, or its role. */
+export function missionAgentName(s: State, ma: Pick<MissionAgent, 'role' | 'agentTypeId'>): string {
+  return (ma.agentTypeId && s.agentTypes[ma.agentTypeId]?.name) || roleName[ma.role]
+}
 
 /** "014" */
 export const missionNo = (m: Pick<Mission, 'number'>) => String(m.number).padStart(3, '0')
@@ -73,10 +100,11 @@ export function orderedMissions(s: State, repoId?: Id): Mission[] {
     .sort((a, b) => rank[a.status] - rank[b.status] || byNumberDesc(a, b))
 }
 
+/** The agents taking part in a mission (removed ones stay in `s.missionAgents` for the thread's history). */
 export function missionAgents(s: State, missionId: Id): MissionAgent[] {
   const order: Record<Role, number> = { planner: 0, builder: 1, tester: 2, reviewer: 3, writer: 4 }
   return Object.values(s.missionAgents)
-    .filter((m) => m.missionId === missionId)
+    .filter((m) => m.missionId === missionId && m.enabled)
     .sort((a, b) => order[a.role] - order[b.role] || a.id.localeCompare(b.id))
 }
 

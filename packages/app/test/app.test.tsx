@@ -37,6 +37,29 @@ describe('desktop', () => {
     expect(screen.queryByRole('button', { name: 'TERMINAL' })).toBeNull()
   })
 
+  it('resizes the terminal dock from its top edge with the keyboard', async () => {
+    window.localStorage.removeItem('astra.size.terminal')
+    const terminal = { open: async () => ({ write() {}, resize() {}, close() {} }) }
+    const client = new MockClient({ seed: demoSeed, latency: 0 })
+    render(<AstraApp client={client} platform="mac" history={{ memory: '/' }} host={{ terminal }} />)
+    const user = userEvent.setup()
+    await user.click(await screen.findByRole('button', { name: 'TERMINAL' }))
+    const dock = await screen.findByRole('region', { name: 'Terminal' })
+    const handle = within(dock).getByRole('separator', { name: 'Resize terminal' })
+    expect(handle.getAttribute('aria-orientation')).toBe('horizontal')
+    const before = Number(handle.getAttribute('aria-valuenow'))
+    expect(dock.style.height).toBe(`${before}px`)
+
+    handle.focus()
+    await user.keyboard('{ArrowUp}')
+    expect(Number(handle.getAttribute('aria-valuenow'))).toBe(before + 16)
+    expect(dock.style.height).toBe(`${before + 16}px`)
+    expect(window.localStorage.getItem('astra.size.terminal')).toBe(String(before + 16))
+
+    await user.keyboard('{Home}')
+    expect(dock.style.height).toBe('120px')
+  })
+
   it('a clean workspace starts at welcome with every agent ready to connect', async () => {
     const client = new MockClient({ seed: starterSeed, latency: 0 })
     render(<AstraApp client={client} platform="mac" history={{ memory: '/' }} />)

@@ -93,6 +93,8 @@ export interface MissionAgent {
   startedAt: Timestamp | null
   branch: string | null
   latest: LogLine[]
+  /** The custom agent type it was added as, if any. */
+  agentTypeId: Id | null
 }
 
 export type TaskColumn = 'queued' | 'working' | 'needsYou' | 'done'
@@ -182,6 +184,16 @@ export interface Membership {
   access: Access
 }
 
+/** A custom agent type: a base role on a default agent (vendor or harness), with its own instructions. */
+export interface AgentType {
+  kind: 'agentType'
+  id: Id
+  name: string
+  role: Role
+  agentId: Id
+  instructions: string
+}
+
 export type Entity =
   | Person
   | Repository
@@ -194,6 +206,7 @@ export type Entity =
   | RaceResult
   | MergeRecord
   | Membership
+  | AgentType
 
 export type EntityKind = Entity['kind']
 export type EntityOf<K extends EntityKind> = Extract<Entity, { kind: K }>
@@ -219,6 +232,7 @@ export interface State {
   results: Record<Id, RaceResult>
   merges: Record<Id, MergeRecord>
   memberships: Record<Id, Membership>
+  agentTypes: Record<Id, AgentType>
   presence: Presence[]
 }
 
@@ -234,6 +248,9 @@ export type Command =
   | { type: 'merge'; resultId: Id }
   | { type: 'connectAgent'; agentId: Id }
   | { type: 'testAgent'; agentId: Id }
+  | { type: 'switchAgent'; missionAgentId: Id; agentId: Id }
+  | { type: 'addAgent'; missionAgentId: Id }
+  | { type: 'removeAgent'; missionAgentId: Id }
 
 export type OpBody =
   | { type: 'put'; entity: Entity }
@@ -272,4 +289,5 @@ export const collectionOf = {
   result: 'results',
   merge: 'merges',
   membership: 'memberships',
+  agentType: 'agentTypes',
 } as const satisfies Record<EntityKind, keyof State>

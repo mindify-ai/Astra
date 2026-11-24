@@ -68,6 +68,19 @@ struct TurnState {
     exited: bool,
 }
 
+/// Why a session is being stopped on purpose.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Handoff {
+    /// Its role moves to another agent, which takes over the turn in the same worktree.
+    Switch,
+    /// It leaves the mission; the turn ends without an error so the mission carries on.
+    Remove,
+}
+
+const STOP_TIMEOUT: Duration = Duration::from_secs(10);
+/// `run_turn`'s error for an agent taken off its mission mid-turn (turned into a quiet success).
+const REMOVED: &str = "removed from the mission";
+
 struct LiveAgent {
     mission_id: String,
     control: mpsc::UnboundedSender<AgentControl>,
@@ -95,6 +108,11 @@ struct Inner {
     task_of: Mutex<HashMap<String, String>>,
     approvals: Mutex<HashMap<String, oneshot::Sender<bool>>>,
     executing: Mutex<HashSet<String>>,
+    /// Mission agents whose session is being stopped on purpose (switched or removed): their failure isn't
+    /// an error.
+    stopping: Mutex<HashMap<String, Handoff>>,
+    /// Mission agents inside `run_turn` (a switch hands their turn to the new agent).
+    in_turn: Mutex<HashSet<String>>,
     cmd_tx: mpsc::UnboundedSender<Op>,
 }
 
@@ -123,6 +141,8 @@ impl Orchestrator {
             task_of: Mutex::new(HashMap::new()),
             approvals: Mutex::new(HashMap::new()),
             executing: Mutex::new(HashSet::new()),
+            stopping: Mutex::new(HashMap::new()),
+            in_turn: Mutex::new(HashSet::new()),
             cmd_tx,
         });
         let orch = Orchestrator { inner };
@@ -282,6 +302,17 @@ impl Orchestrator {
             Command::Merge { result_id } => self.merge(&result_id, &actor).await,
             Command::ConnectAgent { agent_id } => self.check_agent(&agent_id, true).await,
             Command::TestAgent { agent_id } => self.check_agent(&agent_id, false).await,
+            Command::SwitchAgent {
+                mission_agent_id,
+                agent_id,
+            } => {
+                self.switch_agent(&mission_agent_id, &agent_id, &actor)
+                    .await
+            }
+            Command::AddAgent { mission_agent_id } => self.add_agent(&mission_agent_id, &actor),
+            Command::RemoveAgent { mission_agent_id } => {
+                self.remove_agent(&mission_agent_id, &actor).await
+            }
         };
         if let Err(e) = &result {
             tracing::warn!(op = %op.id, error = %e, "command failed");
@@ -777,14 +808,21 @@ impl Orchestrator {
         {
             return Ok(false);
         }
+        // The agent may have been switched since the caller read `ma`: use the current one.
+        let agent_id = read(self.host(), |s| {
+            s.mission_agents
+                .get(&ma.id)
+                .map(|m| m.agent_id.clone())
+                .unwrap_or_else(|| ma.agent_id.clone())
+        });
         let (adapter, policy) = read(self.host(), |s| {
             s.agents
-                .get(&ma.agent_id)
+                .get(&agent_id)
                 .map(|a| (a.adapter.clone(), a.command_policy))
         })
-        .ok_or_else(|| format!("unknown agent {}", ma.agent_id))?;
+        .ok_or_else(|| format!("unknown agent {agent_id}"))?;
         let adapter =
-            adapter.ok_or_else(|| format!("agent {} has no adapter configured", ma.agent_id))?;
+            adapter.ok_or_else(|| format!("agent {agent_id} has no adapter configured"))?;
         let approver = Arc::new(MissionApprover {
             orch: self.clone(),
             mission_id: ma.mission_id.clone(),
@@ -822,10 +860,11 @@ impl Orchestrator {
             while let Some(ev) = events.recv().await {
                 o.on_agent_event(&mission_id, &ma_id, ev, &turn_tx);
             }
-            turn_tx.send_modify(|t| t.exited = true);
+            // Gone from the live map before anyone waiting on `exited` starts a new session.
             if let Ok(mut a) = o.inner.agents.lock() {
                 a.remove(&ma_id);
             }
+            turn_tx.send_modify(|t| t.exited = true);
         });
         Ok(true)
     }
@@ -879,6 +918,15 @@ impl Orchestrator {
                     turns.send_modify(|t| {
                         t.seq += 1;
                         t.error = None;
+                    });
+                    return;
+                }
+                AgentEvent::Error(_) if self.is_stopping(ma_id) => {
+                    drop(streams);
+                    self.flush(ma_id, true);
+                    turns.send_modify(|t| {
+                        t.seq += 1;
+                        t.error = Some("stopped by a person".into());
                     });
                     return;
                 }
@@ -1011,35 +1059,51 @@ impl Orchestrator {
             fields,
         )]);
         let _ = self.take_turn_text(&ma.id);
-        let fresh = self.ensure_session(ma, prompt, worktree)?;
-        let mut rx = self
-            .inner
-            .agents
-            .lock()
-            .ok()
-            .and_then(|a| a.get(&ma.id).map(|l| l.turns.clone()))
-            .ok_or_else(|| "agent session ended".to_string())?;
-        let before = rx.borrow().seq;
-        if !fresh && !self.deliver(&ma.id, prompt) {
-            return Err("agent session ended".into());
+        if let Ok(mut t) = self.inner.in_turn.lock() {
+            t.insert(ma.id.clone());
         }
+        let mut prompt = self.with_agent_type(&ma.id, prompt);
         let outcome = loop {
-            {
-                let t = rx.borrow();
-                if t.seq > before {
-                    break match &t.error {
-                        Some(e) => Err(e.clone()),
-                        None => Ok(()),
-                    };
-                }
-                if t.exited {
-                    break Err("agent exited before finishing".to_string());
-                }
+            let outcome = self.turn_once(ma, &prompt, worktree).await;
+            if outcome.is_ok() {
+                break outcome;
             }
-            if rx.changed().await.is_err() {
-                break Err("agent exited before finishing".to_string());
+            match self.take_handoff(&ma.id) {
+                Some(Handoff::Switch) => {
+                    // The new agent picks the turn up where the old one stopped.
+                    self.wait_stopped(&ma.id).await;
+                    self.emit(vec![OpBody::patch(
+                        EntityKind::MissionAgent,
+                        &ma.id,
+                        [("status", json!("working"))],
+                    )]);
+                    prompt = format!(
+                        "{prompt}\n\nAnother agent started this task in this worktree and was stopped part-way. \
+                         Check what is already done (git status, git diff), then finish the task."
+                    );
+                }
+                Some(Handoff::Remove) => break Err(REMOVED.to_string()),
+                None => break outcome,
             }
         };
+        if let Ok(mut t) = self.inner.in_turn.lock() {
+            t.remove(&ma.id);
+        }
+        if matches!(&outcome, Err(e) if e == REMOVED) {
+            // Leaving the mission is not a failure: its task closes and the mission carries on.
+            if let Some(t) = task_id {
+                self.emit(vec![OpBody::patch(
+                    EntityKind::Task,
+                    t,
+                    [
+                        ("column", json!("done")),
+                        ("note", json!("Removed from the mission")),
+                    ],
+                )]);
+            }
+            let (text, _) = self.take_turn_text(&ma.id);
+            return Ok(text);
+        }
         let (text, _) = self.take_turn_text(&ma.id);
         match &outcome {
             Ok(()) => {
@@ -1068,6 +1132,265 @@ impl Orchestrator {
             }
         }
         outcome.map(|_| text)
+    }
+
+    /// Adds the instructions of the mission agent's custom agent type (if any) to its brief.
+    fn with_agent_type(&self, ma_id: &str, prompt: &str) -> String {
+        let ty = read(self.host(), |s| {
+            s.mission_agents
+                .get(ma_id)
+                .and_then(|m| m.agent_type_id.as_ref())
+                .and_then(|id| s.agent_types.get(id))
+                .cloned()
+        });
+        match ty {
+            Some(t) if !t.instructions.trim().is_empty() => format!(
+                "{prompt}\n\nYou are working as \"{}\". Follow these instructions:\n{}",
+                t.name,
+                t.instructions.trim()
+            ),
+            _ => prompt.to_string(),
+        }
+    }
+
+    /// One attempt at a turn on the mission agent's current agent.
+    async fn turn_once(
+        &self,
+        ma: &MissionAgent,
+        prompt: &str,
+        worktree: &std::path::Path,
+    ) -> Result<(), String> {
+        let fresh = self.ensure_session(ma, prompt, worktree)?;
+        let mut rx = self
+            .inner
+            .agents
+            .lock()
+            .ok()
+            .and_then(|a| a.get(&ma.id).map(|l| l.turns.clone()))
+            .ok_or_else(|| "agent session ended".to_string())?;
+        let before = rx.borrow().seq;
+        if !fresh && !self.deliver(&ma.id, prompt) {
+            return Err("agent session ended".into());
+        }
+        loop {
+            {
+                let t = rx.borrow();
+                if t.seq > before {
+                    return match &t.error {
+                        Some(e) => Err(e.clone()),
+                        None => Ok(()),
+                    };
+                }
+                if t.exited {
+                    return Err("agent exited before finishing".to_string());
+                }
+            }
+            if rx.changed().await.is_err() {
+                return Err("agent exited before finishing".to_string());
+            }
+        }
+    }
+
+    fn is_stopping(&self, ma_id: &str) -> bool {
+        self.inner
+            .stopping
+            .lock()
+            .map(|s| s.contains_key(ma_id))
+            .unwrap_or(false)
+    }
+
+    fn take_handoff(&self, ma_id: &str) -> Option<Handoff> {
+        self.inner.stopping.lock().ok()?.remove(ma_id)
+    }
+
+    /// Waits (bounded) until the mission agent has no live session.
+    async fn wait_stopped(&self, ma_id: &str) {
+        let deadline = tokio::time::Instant::now() + STOP_TIMEOUT;
+        while self.is_running(ma_id) && tokio::time::Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    }
+
+    /// Ends a mission agent's live session on purpose. A turn in progress sees `why` (see `run_turn`); with no
+    /// turn in progress the mark is cleared once the session is gone. Returns whether a session was running.
+    async fn stop_session(&self, ma_id: &str, why: Handoff) -> Result<bool, String> {
+        let live = self
+            .inner
+            .agents
+            .lock()
+            .ok()
+            .and_then(|a| a.get(ma_id).map(|l| (l.control.clone(), l.turns.clone())));
+        let Some((control, mut turns)) = live else {
+            return Ok(false);
+        };
+        if let Ok(mut s) = self.inner.stopping.lock() {
+            s.insert(ma_id.to_string(), why);
+        }
+        let _ = control.send(AgentControl::Cancel);
+        // Wait for this session to end (a handed-over turn may already be starting the next one).
+        let stopped = tokio::time::timeout(STOP_TIMEOUT, async {
+            while !turns.borrow().exited {
+                if turns.changed().await.is_err() {
+                    break;
+                }
+            }
+        })
+        .await
+        .is_ok();
+        let in_turn = self
+            .inner
+            .in_turn
+            .lock()
+            .map(|t| t.contains(ma_id))
+            .unwrap_or(false);
+        if !in_turn {
+            self.take_handoff(ma_id);
+        }
+        if !stopped {
+            return Err(format!(
+                "agent {ma_id} did not stop within {} s",
+                STOP_TIMEOUT.as_secs()
+            ));
+        }
+        Ok(true)
+    }
+
+    /// Checks shared by the commands that change a mission's agents: the mission exists, isn't merged, and
+    /// the actor may steer it.
+    fn editable_mission(&self, mission_id: &str, actor: &str) -> Result<Mission, String> {
+        let (mission, steer) = read(self.host(), |s| {
+            (
+                s.missions.get(mission_id).cloned(),
+                may_steer(s, mission_id, actor),
+            )
+        });
+        let mission = mission.ok_or_else(|| format!("unknown mission {mission_id}"))?;
+        if !steer {
+            return Err(format!("{actor} may not steer mission {mission_id}"));
+        }
+        if mission.status == MissionStatus::Merged {
+            return Err("the mission is already merged".into());
+        }
+        Ok(mission)
+    }
+
+    /// A connected agent with an adapter, ready to take a role.
+    fn usable_agent(&self, agent_id: &str) -> Result<Agent, String> {
+        let agent = read(self.host(), |s| s.agents.get(agent_id).cloned())
+            .ok_or_else(|| format!("unknown agent {agent_id}"))?;
+        if agent.adapter.is_none() {
+            return Err(format!("{} has no adapter configured", agent.name));
+        }
+        if agent.status != AgentStatus::Connected {
+            return Err(format!("{} is not connected", agent.name));
+        }
+        Ok(agent)
+    }
+
+    fn has_pending_approval(&self, ma_id: &str) -> bool {
+        read(self.host(), |s| {
+            s.approvals
+                .values()
+                .any(|a| a.mission_agent_id == ma_id && a.state == ApprovalState::Pending)
+        })
+    }
+
+    /// Runs a mission agent's role on another agent (vendor or harness). A turn in progress is handed over in
+    /// the same worktree; an agent that hasn't started yet simply starts on the new one.
+    async fn switch_agent(&self, ma_id: &str, agent_id: &str, actor: &str) -> CmdResult {
+        let ma = read(self.host(), |s| s.mission_agents.get(ma_id).cloned())
+            .ok_or_else(|| format!("unknown agent {ma_id}"))?;
+        self.editable_mission(&ma.mission_id, actor)?;
+        let agent = self.usable_agent(agent_id)?;
+        if ma.agent_id == agent_id {
+            return Ok(());
+        }
+        if self.has_pending_approval(ma_id) {
+            return Err("decide its pending approval first".into());
+        }
+        let old = read(self.host(), |s| {
+            s.agents.get(&ma.agent_id).map(|a| a.name.clone())
+        })
+        .unwrap_or_else(|| ma.agent_id.clone());
+        // Switch first, so whoever starts the next session (a handed-over turn included) uses the new agent.
+        self.emit(vec![OpBody::patch(
+            EntityKind::MissionAgent,
+            ma_id,
+            [
+                ("agentId", json!(agent.id)),
+                ("statusDetail", json!(format!("switched from {old}"))),
+            ],
+        )]);
+        self.stop_session(ma_id, Handoff::Switch).await?;
+        Ok(())
+    }
+
+    /// Starts an agent the client just put on a mission that is already under way. One added before the
+    /// mission starts is picked up by `startMission`.
+    fn add_agent(&self, ma_id: &str, actor: &str) -> CmdResult {
+        let ma = read(self.host(), |s| s.mission_agents.get(ma_id).cloned())
+            .ok_or_else(|| format!("unknown agent {ma_id}"))?;
+        let mission = self.editable_mission(&ma.mission_id, actor)?;
+        self.usable_agent(&ma.agent_id)?;
+        if mission.status == MissionStatus::Draft {
+            return Ok(());
+        }
+        if mission.mode == MissionMode::Race {
+            return Err("a race's entrants are fixed once it starts".into());
+        }
+        let worktree = self
+            .worktree_of(&ma)
+            .ok_or_else(|| "the mission has no worktree to work in".to_string())?;
+        let prompt = prompt_for(ma.role, &mission, "");
+        let o = self.clone();
+        tokio::spawn(async move {
+            if let Err(e) = o.run_turn(&ma, &prompt, &worktree, None).await {
+                o.emit(vec![OpBody::patch(
+                    EntityKind::MissionAgent,
+                    &ma.id,
+                    [
+                        ("status", json!("idle")),
+                        ("statusDetail", json!(format!("error: {e}"))),
+                    ],
+                )]);
+            }
+        });
+        Ok(())
+    }
+
+    /// Takes an agent off a mission: its session stops, it stays in the thread's history, and the mission
+    /// carries on without it.
+    async fn remove_agent(&self, ma_id: &str, actor: &str) -> CmdResult {
+        let ma = read(self.host(), |s| s.mission_agents.get(ma_id).cloned())
+            .ok_or_else(|| format!("unknown agent {ma_id}"))?;
+        self.editable_mission(&ma.mission_id, actor)?;
+        if !ma.enabled {
+            return Ok(());
+        }
+        let others = read(self.host(), |s| {
+            s.mission_agents
+                .values()
+                .filter(|m| m.mission_id == ma.mission_id && m.enabled && m.id != ma_id)
+                .count()
+        });
+        if others == 0 {
+            return Err("a mission needs at least one agent".into());
+        }
+        if self.has_pending_approval(ma_id) {
+            return Err("decide its pending approval first".into());
+        }
+        self.emit(vec![OpBody::patch(
+            EntityKind::MissionAgent,
+            ma_id,
+            [
+                ("enabled", json!(false)),
+                ("status", json!("done")),
+                ("statusDetail", json!("removed")),
+                ("steeredBy", Value::Null),
+            ],
+        )]);
+        self.stop_session(ma_id, Handoff::Remove).await?;
+        Ok(())
     }
 
     // -------------------------------------------------------------------------------------- missions

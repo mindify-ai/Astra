@@ -14,13 +14,14 @@ Every entity has `kind` and `id`. Clients hold a normalized `State` with one map
 | `repository`   | `id, name, source: github\|gitlab\|local, defaultBranch, path: string\|null, remoteUrl: string\|null`                                                                                                                                                                                        |
 | `agent`        | `id, name, vendor, category: codingAgent\|harness\|protocol\|local, transport, adapter: Adapter\|null, runsOn: local\|server, nodeId: string\|null, commandPolicy: askMe\|askSteerers\|auto, status: connected\|settingUp\|notConnected\|offline, requiresNetwork: bool`                     |
 | `mission`      | `id, number, title, shortName, goal, mode: split\|race, repoId, baseBranch, branch, status: draft\|working\|needsYou\|done\|merged, approvalPolicy: owner\|steerers, ownerId, nodeId: string\|null, stats: DiffStats\|null, createdAt`                                                       |
-| `missionAgent` | `id, missionId, agentId, role: planner\|builder\|tester\|reviewer\|writer, enabled: bool, status: idle\|queued\|working\|needsYou\|done\|offline, statusDetail: string\|null, steeredBy: string\|null, task: string\|null, startedAt: string\|null, branch: string\|null, latest: LogLine[]` |
+| `missionAgent` | `id, missionId, agentId, role: planner\|builder\|tester\|reviewer\|writer, enabled: bool, status: idle\|queued\|working\|needsYou\|done\|offline, statusDetail: string\|null, steeredBy: string\|null, task: string\|null, startedAt: string\|null, branch: string\|null, latest: LogLine[], agentTypeId: string\|null` (the custom agent type it was added as) |
 | `task`         | `id, missionId, title, role, missionAgentId: string\|null, column: queued\|working\|needsYou\|done, note: string\|null, mergedBy: string\|null, approvalId: string\|null, order: number`                                                                                                     |
 | `message`      | `id, missionId, author: Author, steering: string\|null, to: string\|null, body, plan: PlanStep[], log: LogLine[], approvalId: string\|null, at`                                                                                                                                              |
 | `approval`     | `id, missionId, missionAgentId, prompt, command: string\|null, state: pending\|approved\|denied, decidedBy: string\|null, decidedAt: string\|null`                                                                                                                                           |
 | `result`       | `id, missionId, label, missionAgentId, branch, stats: DiffStats, checks: passed\|failed\|pending\|none, reviewerPick: bool, diff: DiffFile[]`                                                                                                                                                |
 | `merge`        | `id, missionId, resultId: string\|null, into, stats: DiffStats, checks, approvedBy, note: string\|null, keptBranches: string[], at`                                                                                                                                                          |
 | `membership`   | `id` (= `"<missionId>:<personId>"`), `missionId, personId, access: owner\|steer\|watch`                                                                                                                                                                                                      |
+| `agentType` | `id, name, role, agentId, instructions`: a custom agent type, a base role on a default agent (vendor or harness) with its own instructions. Clients put and delete them; a runner node adds `instructions` to the brief of every mission agent whose `agentTypeId` names it. |
 
 Value types:
 
@@ -36,7 +37,7 @@ Value types:
 - Timestamps are RFC 3339 UTC strings.
 
 `State` = `{ workspaceId, me, people, repositories, agents, missions, missionAgents, tasks, messages,
-approvals, results, merges, memberships, presence }`. Each entity map is `Record<id, Entity>`.
+approvals, results, merges, memberships, agentTypes, presence }`. Each entity map is `Record<id, Entity>`.
 `presence` is `Presence[]`, where `Presence` = `{personId, missionId: string|null, activity, at}`. Presence is
 ephemeral: it's relayed but never stored in the op log.
 
@@ -73,6 +74,8 @@ causal arrival order of `fixtures/ops-conformance.json`.
 - `pause{missionAgentId}`, `resume{missionAgentId}`
 - `merge{resultId}`
 - `connectAgent{agentId}`, `testAgent{agentId}`
+- `switchAgent{missionAgentId, agentId}`: run that role on another connected agent (vendor or harness)
+- `addAgent{missionAgentId}`, `removeAgent{missionAgentId}`: add a role to a mission or take one off
 
 A client creates a mission by issuing `put` ops for the mission, its missionAgents and its memberships, then a
 `startMission` command.
@@ -82,7 +85,7 @@ A client creates a mission by issuing `put` ops for the mission, its missionAgen
 - **Authorization.**
   - Approvals and merges may be decided by the mission owner. Members with `steer` access may also decide them
     when the mission's `approvalPolicy` is `steerers`, or when the agent's `commandPolicy` is `askSteerers`.
-  - `sendMessage` and `takeSteering` need owner or steer access.
+  - `sendMessage`, `takeSteering`, `switchAgent`, `addAgent` and `removeAgent` need owner or steer access.
   - `sendMessage` with `to` set also needs the agent's steering lock; the node takes it implicitly when it is free.
   - The same rules live in `@astra/client` `policy.ts`, which the UI and the mock node use.
 - **Identity.** The relay checks every pushed op against the signed-in person. A `command` must be authored by
@@ -101,12 +104,15 @@ A client creates a mission by issuing `put` ops for the mission, its missionAgen
 
 ### Who writes what
 
-| command            | client writes                                                                             | node writes                                                                                                                                                                                                                                           |
-| ------------------ | ----------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `sendMessage`      | The `message` put, `author.type = person`                                                 | Delivers `body` to the target agent, or to every enabled agent when `to` is null; writes no duplicate message. If `to` is set and free, patches `steeredBy = actor`; if someone else holds it, rejects.                                               |
-| `approve` / `deny` | Only the command                                                                          | Patches the approval (`state, decidedBy, decidedAt`) and the missionAgent status (`working`/`idle`). The linked task goes to `working` on approve, or to `done` with note `Denied by <actor>` on deny. Then the node resumes or cancels the agent.    |
-| `merge`            | Only the command                                                                          | Writes the `merge` entity (`id = missionId`), patches mission `status = merged`, and patches the linked `needsYou` task to `done` with `mergedBy`.                                                                                                    |
-| `startMission`     | Mission put (`status = draft`, `number = max + 1`), missionAgents (`queued`), memberships | Patches mission `status = working`, then writes tasks/messages as agents run. Agent messages use `author.type = agent`; plans go in `plan`, edits and commands in `log` (`verb` = edit\|run\|read). `missionAgent.latest` keeps the last 3 log lines. |
+| command            | client writes                                                                             | node writes                                                                                                                                                                                                                                                                                                                                                                                       |
+| ------------------ | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sendMessage`      | The `message` put, `author.type = person`                                                 | Delivers `body` to the target agent, or to every enabled agent when `to` is null; writes no duplicate message. If `to` is set and free, patches `steeredBy = actor`; if someone else holds it, rejects.                                                                                                                                                                                           |
+| `approve` / `deny` | Only the command                                                                          | Patches the approval (`state, decidedBy, decidedAt`) and the missionAgent status (`working`/`idle`). The linked task goes to `working` on approve, or to `done` with note `Denied by <actor>` on deny. Then the node resumes or cancels the agent.                                                                                                                                                |
+| `merge`            | Only the command                                                                          | Writes the `merge` entity (`id = missionId`), patches mission `status = merged`, and patches the linked `needsYou` task to `done` with `mergedBy`.                                                                                                                                                                                                                                                |
+| `startMission`     | Mission put (`status = draft`, `number = max + 1`), missionAgents (`queued`), memberships | Patches mission `status = working`, then writes tasks/messages as agents run. Agent messages use `author.type = agent`; plans go in `plan`, edits and commands in `log` (`verb` = edit\|run\|read). `missionAgent.latest` keeps the last 3 log lines.                                                                                                                                             |
+| `switchAgent`      | Only the command                                                                          | Rejects an unknown agent, one without an adapter, one that isn't `connected`, or a merged mission. Patches the missionAgent `agentId` and `statusDetail = switched from <old name>`. A running session is cancelled; if the agent was mid-task the task is handed to the new agent in the same worktree, so the mission carries on. An agent that has not started yet just starts on the new one. |
+| `addAgent` | The missionAgent put (`status = queued`, `enabled = true`) | Nothing more for a `draft` mission: `startMission` picks it up. On a split mission under way, starts it in the mission worktree with its role's brief. Rejects races that have started, merged missions, and agents that aren't connected. |
+| `removeAgent` | Only the command | Patches the missionAgent `enabled = false, status = done, statusDetail = removed, steeredBy = null` and stops its session; a task it was on closes with note `Removed from the mission` and the mission carries on. The entity stays, so its messages keep their author. Rejects removing the last enabled agent, or one with a pending approval. |
 
 ## Sync wire protocol
 

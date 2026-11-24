@@ -1,15 +1,9 @@
-import {
-  type Access,
-  createMission,
-  type MissionMode,
-  type Role,
-  slugify,
-  titleFromGoal,
-} from '@astra/client'
+import { type Access, createMission, type MissionMode, slugify, titleFromGoal } from '@astra/client'
 import {
   Avatar,
   Button,
   buttonClass,
+  CloseIcon,
   Eyebrow,
   Field,
   inlineLinkClass,
@@ -22,11 +16,27 @@ import {
 import { Link, useNavigate } from '@tanstack/react-router'
 import { useMemo, useState } from 'react'
 import { useAstraState, useClient, useUi } from '../context'
-import { orderedMissions, roleName, roleVerb } from '../select'
+import { connectedAgents, missionAgentName, orderedMissions } from '../select'
+import { type AgentChoice, firstChoice, HarnessSelect, TypeSelect } from '../shared/agentPicker'
 import { AppHeader, Page } from '../shell/AppHeader'
 import { defaultTeam } from '../team'
 
-const roles: Role[] = ['planner', 'builder', 'tester', 'reviewer']
+interface TeamRow extends AgentChoice {
+  key: string
+  enabled: boolean
+}
+
+let rows = 0
+const rowKey = () => `row-${++rows}`
+
+const teamRows = (s: ReturnType<typeof useAstraState>, mode: MissionMode): TeamRow[] =>
+  defaultTeam(s, mode).map((t) => ({
+    key: rowKey(),
+    agentId: t.agent.id,
+    role: t.role,
+    agentTypeId: null,
+    enabled: true,
+  }))
 
 /** 5 · New mission. */
 export function Launch({ initialGoal = '' }: { initialGoal?: string }) {
@@ -37,9 +47,7 @@ export function Launch({ initialGoal = '' }: { initialGoal?: string }) {
   const [goal, setGoal] = useState(initialGoal)
   const [mode, setMode] = useState<MissionMode>('split')
   const [branch, setBranch] = useState('')
-  const [team, setTeam] = useState(() =>
-    defaultTeam(s, 'split').map((t) => ({ agentId: t.agent.id, role: t.role, enabled: true })),
-  )
+  const [team, setTeam] = useState<TeamRow[]>(() => teamRows(s, 'split'))
   const [managing, setManaging] = useState(false)
   const repo = s.repositories[ui.repoId]
 
@@ -58,7 +66,7 @@ export function Launch({ initialGoal = '' }: { initialGoal?: string }) {
 
   const pickMode = (m: MissionMode) => {
     setMode(m)
-    setTeam(defaultTeam(s, m).map((t) => ({ agentId: t.agent.id, role: t.role, enabled: true })))
+    setTeam(teamRows(s, m))
   }
 
   const branchPlaceholder = `astra/${slugify(titleFromGoal(goal || 'new mission'))}`
@@ -91,7 +99,12 @@ export function Launch({ initialGoal = '' }: { initialGoal?: string }) {
       repoId: repo.id,
       baseBranch: repo.defaultBranch,
       branch: branch || undefined,
-      agents: team,
+      agents: team.map(({ agentId, role, enabled, agentTypeId }) => ({
+        agentId,
+        role,
+        enabled,
+        agentTypeId,
+      })),
       people: Object.entries(people).map(([personId, access]) => ({ personId, access })),
     })
     ui.setLastMissionId(id)
@@ -169,49 +182,71 @@ export function Launch({ initialGoal = '' }: { initialGoal?: string }) {
             </Link>
           </div>
           <div className="border-t border-line">
-            {team.map((t, i) => {
+            {team.map((t) => {
               const agent = s.agents[t.agentId]
-              if (!agent) return null
+              const name = missionAgentName(s, t)
+              const update = (next: Partial<TeamRow>) =>
+                setTeam(team.map((x) => (x.key === t.key ? { ...x, ...next } : x)))
               return (
                 <div
-                  key={t.agentId}
-                  className="flex min-h-12 flex-wrap items-center gap-x-4 gap-y-1 border-b border-line-subtle px-3 py-1"
+                  key={t.key}
+                  className="flex min-h-12 flex-wrap items-center gap-x-3 gap-y-1 border-b border-line-subtle px-3 py-1"
                 >
-                  <label className="flex min-h-10 flex-[1_1_280px] cursor-pointer items-center gap-3">
+                  <label className="flex min-h-10 flex-[1_1_200px] cursor-pointer items-center gap-3">
                     <input
                       type="checkbox"
                       className="size-4"
                       checked={t.enabled}
-                      onChange={() =>
-                        setTeam(team.map((x, j) => (j === i ? { ...x, enabled: !x.enabled } : x)))
-                      }
+                      onChange={() => update({ enabled: !t.enabled })}
                     />
-                    <span className="font-medium">{roleName[t.role]}</span>
-                    <Spec>{agent.name}</Spec>
+                    <span className="font-medium">{name}</span>
+                    <Spec>{agent?.name}</Spec>
                   </label>
-                  <Select
+                  <TypeSelect
+                    s={s}
+                    label={`Type for ${name} on ${agent?.name ?? 'agent'}`}
+                    value={t}
+                    onChange={update}
+                  />
+                  <HarnessSelect
+                    s={s}
+                    label={`Agent for ${name}`}
+                    value={t.agentId}
+                    onChange={(agentId) => update({ agentId })}
+                  />
+                  <Button
+                    variant="text"
                     size="sm"
-                    aria-label={`Role for ${agent.name}`}
-                    value={t.role}
-                    onChange={(e) =>
-                      setTeam(team.map((x, j) => (j === i ? { ...x, role: e.target.value as Role } : x)))
-                    }
+                    aria-label={`Remove ${name} on ${agent?.name ?? 'agent'}`}
+                    onClick={() => setTeam(team.filter((x) => x.key !== t.key))}
                   >
-                    {[t.role, ...roles.filter((r) => r !== t.role)].map((r) => (
-                      <option key={r} value={r}>
-                        {roleVerb[r]}
-                      </option>
-                    ))}
-                  </Select>
+                    <CloseIcon size={14} />
+                  </Button>
                 </div>
               )
             })}
             {team.length === 0 ? (
               <p className="m-0 border-b border-line-subtle px-3 py-3 text-ink-muted">
-                No agents are connected yet.
+                {connectedAgents(s).length === 0
+                  ? 'No agents are connected yet.'
+                  : 'No agents on this mission yet.'}
               </p>
             ) : null}
           </div>
+          {firstChoice(s) ? (
+            <div>
+              <Button
+                variant="text"
+                size="sm"
+                onClick={() => {
+                  const c = firstChoice(s)
+                  if (c) setTeam([...team, { ...c, key: rowKey(), enabled: true }])
+                }}
+              >
+                + Add agent
+              </Button>
+            </div>
+          ) : null}
         </section>
 
         <section className="flex flex-col gap-3">

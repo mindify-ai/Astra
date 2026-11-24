@@ -7,6 +7,7 @@ import type {
   Id,
   LogLine,
   Message,
+  Mission,
   MissionAgent,
   Op,
   OpBody,
@@ -200,8 +201,105 @@ export class MockClient extends Store {
           return this.merge(op, node, cmd.resultId)
         case 'startMission':
           return this.start(op, node, cmd.missionId)
+        case 'switchAgent':
+          return this.switchAgent(op, node, cmd.missionAgentId, cmd.agentId)
+        case 'addAgent':
+          return this.addAgent(op, node, cmd.missionAgentId)
+        case 'removeAgent':
+          return this.removeAgent(op, node, cmd.missionAgentId)
       }
     })
+  }
+
+  /** The checks the runtime makes before a mission's agents change (see `editable_mission`). */
+  private editable(op: Op, maId: Id): { ma: MissionAgent; mission: Mission } | string {
+    const s = this.state
+    const ma = s.missionAgents[maId]
+    const mission = ma ? s.missions[ma.missionId] : undefined
+    if (!ma || !mission) return `unknown agent ${maId}`
+    if (!maySteer(s, mission.id, op.actor)) return `${op.actor} may not steer mission ${mission.id}`
+    if (mission.status === 'merged') return 'the mission is already merged'
+    return { ma, mission }
+  }
+
+  private usable(agentId: Id): string | null {
+    const agent = this.state.agents[agentId]
+    if (!agent) return `unknown agent ${agentId}`
+    if (agent.status !== 'connected') return `${agent.name} is not connected`
+    return null
+  }
+
+  private pendingApproval(maId: Id): boolean {
+    return Object.values(this.state.approvals).some((a) => a.missionAgentId === maId && a.state === 'pending')
+  }
+
+  private switchAgent(op: Op, node: Id, maId: Id, agentId: Id) {
+    const e = this.editable(op, maId)
+    if (typeof e === 'string') return this.ok(node, op, e)
+    const bad = this.usable(agentId)
+    if (bad) return this.ok(node, op, bad)
+    if (e.ma.agentId === agentId) return this.ok(node, op)
+    if (this.pendingApproval(maId)) return this.ok(node, op, 'decide its pending approval first')
+    const old = this.state.agents[e.ma.agentId]?.name ?? e.ma.agentId
+    const bodies: OpBody[] = [
+      this.patch('missionAgent', maId, { agentId, statusDetail: `switched from ${old}` }),
+    ]
+    if (e.ma.status === 'working')
+      bodies.push(this.agentMessage(e.ma, `Taking over from ${old}. Picking up where it stopped.`))
+    this.node(node, bodies)
+    return this.ok(node, op)
+  }
+
+  private addAgent(op: Op, node: Id, maId: Id) {
+    const e = this.editable(op, maId)
+    if (typeof e === 'string') return this.ok(node, op, e)
+    const bad = this.usable(e.ma.agentId)
+    if (bad) return this.ok(node, op, bad)
+    if (e.mission.status === 'draft') return this.ok(node, op)
+    if (e.mission.mode === 'race') return this.ok(node, op, "a race's entrants are fixed once it starts")
+    this.node(node, [
+      this.patch('missionAgent', maId, {
+        status: 'working',
+        statusDetail: null,
+        startedAt: new Date().toISOString(),
+        branch: e.mission.branch,
+        task: e.mission.title,
+      }),
+      this.agentMessage(e.ma, 'Joined the mission. Reading the thread and the worktree first.'),
+    ])
+    this.refreshMissionStatus(node, e.mission.id)
+    this.ok(node, op)
+    this.later(() => {
+      const ma = this.state.missionAgents[maId]
+      if (ma?.enabled && ma.status === 'working') {
+        this.node(node, [this.patch('missionAgent', maId, { status: 'done' })])
+        this.refreshMissionStatus(node, e.mission.id)
+      }
+    }, 4)
+  }
+
+  private removeAgent(op: Op, node: Id, maId: Id) {
+    const e = this.editable(op, maId)
+    if (typeof e === 'string') return this.ok(node, op, e)
+    if (!e.ma.enabled) return this.ok(node, op)
+    if (this.agentsOf(this.state, e.mission.id).length <= 1)
+      return this.ok(node, op, 'a mission needs at least one agent')
+    if (this.pendingApproval(maId)) return this.ok(node, op, 'decide its pending approval first')
+    const bodies: OpBody[] = [
+      this.patch('missionAgent', maId, {
+        enabled: false,
+        status: 'done',
+        statusDetail: 'removed',
+        steeredBy: null,
+      }),
+    ]
+    for (const t of Object.values(this.state.tasks)) {
+      if (t.missionAgentId === maId && t.column !== 'done')
+        bodies.push(this.patch('task', t.id, { column: 'done', note: 'Removed from the mission' }))
+    }
+    this.node(node, bodies)
+    this.refreshMissionStatus(node, e.mission.id)
+    return this.ok(node, op)
   }
 
   private refreshMissionStatus(node: Id, missionId: Id) {

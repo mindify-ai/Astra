@@ -310,6 +310,144 @@
           }
         }
       ]
+    },
+    {
+      "name": "switchAgent: the command changes nothing; the node's agentId patch does",
+      "initial": [
+        {
+          "kind": "missionAgent",
+          "id": "ma-1",
+          "missionId": "m-1",
+          "agentId": "a-codex",
+          "role": "builder",
+          "enabled": true,
+          "status": "working",
+          "statusDetail": null,
+          "steeredBy": null,
+          "task": null,
+          "startedAt": null,
+          "branch": null,
+          "latest": []
+        }
+      ],
+      "ops": [
+        {
+          "id": "01J0000000000000000000000S",
+          "hlc": "0001732180000100:000000:n1",
+          "actor": "p-mark",
+          "body": {
+            "type": "command",
+            "node": "n-1",
+            "command": {
+              "type": "switchAgent",
+              "missionAgentId": "ma-1",
+              "agentId": "a-claude"
+            }
+          }
+        },
+        {
+          "id": "01J0000000000000000000000T",
+          "hlc": "0001732180000200:000000:n-1",
+          "actor": "n-1",
+          "body": {
+            "type": "patch",
+            "entityKind": "missionAgent",
+            "id": "ma-1",
+            "fields": {
+              "agentId": "a-claude",
+              "statusDetail": "switched from Codex"
+            }
+          }
+        }
+      ],
+      "expect": [
+        {
+          "kind": "missionAgent",
+          "id": "ma-1",
+          "fields": {
+            "agentId": "a-claude",
+            "statusDetail": "switched from Codex",
+            "status": "working"
+          }
+        }
+      ]
+    },
+    {
+      "name": "agent types: put, use on a mission agent, delete (the agent keeps its type id)",
+      "initial": [
+        {
+          "kind": "missionAgent",
+          "id": "ma-1",
+          "missionId": "m-1",
+          "agentId": "a-codex",
+          "role": "reviewer",
+          "enabled": true,
+          "status": "queued",
+          "statusDetail": null,
+          "steeredBy": null,
+          "task": null,
+          "startedAt": null,
+          "branch": null,
+          "latest": [],
+          "agentTypeId": null
+        }
+      ],
+      "ops": [
+        {
+          "id": "01J0000000000000000000000U",
+          "hlc": "0001732180000100:000000:n1",
+          "actor": "p-mark",
+          "body": {
+            "type": "put",
+            "entity": {
+              "kind": "agentType",
+              "id": "at-1",
+              "name": "Security reviewer",
+              "role": "reviewer",
+              "agentId": "a-codex",
+              "instructions": "Look for injection."
+            }
+          }
+        },
+        {
+          "id": "01J0000000000000000000000V",
+          "hlc": "0001732180000200:000000:n1",
+          "actor": "p-mark",
+          "body": {
+            "type": "patch",
+            "entityKind": "missionAgent",
+            "id": "ma-1",
+            "fields": {
+              "agentTypeId": "at-1"
+            }
+          }
+        },
+        {
+          "id": "01J0000000000000000000000W",
+          "hlc": "0001732180000300:000000:n1",
+          "actor": "p-mark",
+          "body": {
+            "type": "delete",
+            "entityKind": "agentType",
+            "id": "at-1"
+          }
+        }
+      ],
+      "expect": [
+        {
+          "kind": "missionAgent",
+          "id": "ma-1",
+          "fields": {
+            "agentTypeId": "at-1",
+            "role": "reviewer"
+          }
+        },
+        {
+          "kind": "agentType",
+          "id": "at-1",
+          "fields": null
+        }
+      ]
     }
   ],
   "rules": [

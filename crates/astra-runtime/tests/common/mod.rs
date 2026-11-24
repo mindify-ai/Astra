@@ -177,6 +177,7 @@ pub fn mission_agent(id: &str, mission: &str, agent: &str, role: Role) -> Entity
         started_at: None,
         branch: None,
         latest: vec![],
+        agent_type_id: None,
     })
 }
 

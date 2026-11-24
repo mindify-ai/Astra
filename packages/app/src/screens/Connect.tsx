@@ -23,6 +23,7 @@ import { Link } from '@tanstack/react-router'
 import { useState } from 'react'
 import { useAstraState, useClient } from '../context'
 import { AppHeader, Page } from '../shell/AppHeader'
+import { AgentTypesSection } from './AgentTypes'
 
 const sections: { title: string; category: AgentConnection['category'][] }[] = [
   { title: 'Coding agents', category: ['codingAgent'] },
@@ -295,6 +296,7 @@ export function Connect() {
               </section>
             )
           })}
+          <AgentTypesSection />
         </main>
         <aside className="box-border flex-[1_1_360px] border-l border-line bg-surface-alt px-6 py-8">
           {selected ? <SetupForm key={selected.id} agent={selected} /> : null}

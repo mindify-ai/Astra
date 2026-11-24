@@ -8,9 +8,11 @@ import {
   Eyebrow,
   KVList,
   LogWell,
+  ResizeHandle,
   Spec,
   Status,
   toneTextClass,
+  useResizable,
 } from '@astra/ui'
 import { Link } from '@tanstack/react-router'
 import {
@@ -24,6 +26,7 @@ import {
 } from 'react'
 import { useAstraState, useClient, useUi } from '../context'
 import {
+  agentNames,
   agentOf,
   agentStatus,
   canSteer,
@@ -32,8 +35,8 @@ import {
   missionAgents,
   missionNo,
   personName,
-  roleName,
 } from '../select'
+import { AddAgentForm, AgentControls, useCanChangeTeam } from '../shared/missionTeam'
 import { AppHeader, NewMissionButton, Page, ShareButton } from '../shell/AppHeader'
 import { MissionNotFound, useMissionPresence } from './common'
 import {
@@ -156,6 +159,16 @@ export function MapView({ missionId }: { missionId: string }) {
     if (mission) ui.setLastMissionId(missionId)
   }, [missionId, mission, ui])
 
+  const names = agentNames(s, agents)
+  const changeTeam = useCanChangeTeam(missionId)
+  const [asideWidth, asideHandle] = useResizable({
+    storageKey: 'astra.size.map.aside',
+    initial: 320,
+    min: 260,
+    max: 640,
+    axis: 'x',
+    invert: true,
+  })
   const reduced = useReducedMotion()
   const agentKey = agents.map((a) => a.id).join(',')
   // biome-ignore lint/correctness/useExhaustiveDependencies: the default layout depends only on which agents are on the mission
@@ -205,8 +218,7 @@ export function MapView({ missionId }: { missionId: string }) {
     working: agents.filter((a) => a.status === 'working').length,
     needs: agents.filter((a) => a.status === 'needsYou').length,
   }
-  const label = (id: string) =>
-    id === MISSION ? `Mission ${missionNo(mission)}` : roleName[s.missionAgents[id]?.role ?? 'builder']
+  const label = (id: string) => (id === MISSION ? `Mission ${missionNo(mission)}` : (names[id] ?? 'Agent'))
 
   const startDrag = (id: string, e: ReactPointerEvent<HTMLElement>) => {
     if (e.button !== 0) return
@@ -421,7 +433,7 @@ export function MapView({ missionId }: { missionId: string }) {
                             e.mode === 'pulse' && 'astra-pulse',
                           )}
                         >
-                          <title>{`${roleName[ma.role]}: ${e.label}`}</title>
+                          <title>{`${names[ma.id]}: ${e.label}`}</title>
                         </path>
                         {e.mode === 'flow' && !reduced ? (
                           <circle r="3" fill={e.color}>
@@ -483,7 +495,7 @@ export function MapView({ missionId }: { missionId: string }) {
                         animationDelay: reduced ? undefined : `${80 + i * 70}ms`,
                       }}
                     >
-                      <b className="font-semibold">{roleName[ma.role]}</b>
+                      <b className="font-semibold">{names[ma.id]}</b>
                       <Spec>{agentOf(s, ma)?.name}</Spec>
                       <span className={cx('text-[13px]', toneTextClass(st.tone))}>
                         <Dot tone={st.tone} className={cx('mr-2 align-middle', active && 'astra-pulse')} />
@@ -544,12 +556,16 @@ export function MapView({ missionId }: { missionId: string }) {
           </div>
         </main>
 
-        <aside className="box-border flex flex-[1_1_320px] flex-col gap-6 border-l border-line bg-surface-alt p-6">
+        <aside
+          style={{ flexBasis: asideWidth }}
+          className="relative box-border flex flex-[1_1_320px] flex-col gap-6 border-l border-line bg-surface-alt p-6"
+        >
+          <ResizeHandle {...asideHandle} label="Resize details" />
           {selected ? (
             <>
               <div className="flex flex-col gap-2">
                 <Eyebrow>Selected agent</Eyebrow>
-                <h2 className="m-0 text-title">{roleName[selected.role]}</h2>
+                <h2 className="m-0 text-title">{names[selected.id]}</h2>
                 <Spec>
                   {[
                     agentOf(s, selected)?.name,
@@ -600,10 +616,12 @@ export function MapView({ missionId }: { missionId: string }) {
                   </Button>
                 ) : null}
               </div>
+              {changeTeam ? <AgentControls key={selected.id} ma={selected} /> : null}
             </>
           ) : (
             <p className="m-0 text-ink-muted">This mission has no agents.</p>
           )}
+          {changeTeam ? <AddAgentForm missionId={missionId} onAdded={setSelectedId} /> : null}
         </aside>
       </div>
     </Page>

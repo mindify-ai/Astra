@@ -484,10 +484,23 @@ async fn create_terminal(s: &Arc<Shared>, p: &Value) -> RpcResult {
         format!("{command} {}", args.join(" "))
     };
     if command_needs_approval(s.ctx.command_policy, Some(&cwd), s.workspace.root()) {
-        let pre = s
-            .pre_approved
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
-            .is_ok();
+        // Take one prior approval if there is any (a CAS loop: `fetch_update` is deprecated on newer
+        // toolchains and its replacement is newer than our MSRV).
+        let pre = {
+            let mut cur = s.pre_approved.load(Ordering::SeqCst);
+            loop {
+                let Some(next) = cur.checked_sub(1) else {
+                    break false;
+                };
+                match s
+                    .pre_approved
+                    .compare_exchange(cur, next, Ordering::SeqCst, Ordering::SeqCst)
+                {
+                    Ok(_) => break true,
+                    Err(actual) => cur = actual,
+                }
+            }
+        };
         let inside = crate::policy::within(&cwd, s.workspace.root());
         // A prior approval only covers commands inside the worktree.
         let allowed = (pre && inside)

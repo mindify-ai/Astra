@@ -205,6 +205,7 @@ async fn mission_over_relay_with_remote_approval_and_merge() {
             started_at: None,
             branch: None,
             latest: vec![],
+            agent_type_id: None,
         }),
         OpBody::put(Membership {
             id: "m-1:p-dev-mark".into(),

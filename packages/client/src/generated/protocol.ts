@@ -126,6 +126,8 @@ export interface MissionAgent {
   startedAt: string | null
   branch: string | null
   latest: LogLine[]
+  /** The custom agent type it was added as, if any. */
+  agentTypeId: string | null
 }
 
 export interface Task {
@@ -203,6 +205,16 @@ export interface Membership {
   access: Access
 }
 
+/** A custom agent type: a base role on a default agent (vendor or harness), with its own instructions. */
+export interface AgentType {
+  kind: 'agentType'
+  id: string
+  name: string
+  role: Role
+  agentId: string
+  instructions: string
+}
+
 export type Entity =
   | Person
   | Repository
@@ -215,6 +227,7 @@ export type Entity =
   | MissionResult
   | Merge
   | Membership
+  | AgentType
 
 export type EntityKind = Entity['kind']
 
@@ -231,6 +244,7 @@ export interface EntityByKind {
   result: MissionResult
   merge: Merge
   membership: Membership
+  agentType: AgentType
 }
 
 export interface Presence {
@@ -254,6 +268,7 @@ export interface State {
   results: Record<string, MissionResult>
   merges: Record<string, Merge>
   memberships: Record<string, Membership>
+  agentTypes: Record<string, AgentType>
   presence: Presence[]
 }
 
@@ -282,6 +297,9 @@ export type Command =
   | { type: 'merge'; resultId: string }
   | { type: 'connectAgent'; agentId: string }
   | { type: 'testAgent'; agentId: string }
+  | { type: 'switchAgent'; missionAgentId: string; agentId: string }
+  | { type: 'addAgent'; missionAgentId: string }
+  | { type: 'removeAgent'; missionAgentId: string }
 
 export type OpBody =
   | { type: 'put'; entity: Entity }
