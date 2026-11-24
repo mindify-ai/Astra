@@ -470,7 +470,7 @@ export function CodeEditor({
     applied.current = original
     v.dispatch({ effects: diffSlot.reconfigure(original === null ? [] : diffExtension(original)) })
     callbacks.current.onDiff?.(diffCount(v.state))
-  }, [original, path])
+  }, [original])
 
   return <div ref={host} className="min-h-0 grow overflow-hidden" />
 }

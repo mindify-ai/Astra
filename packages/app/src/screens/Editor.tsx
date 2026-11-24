@@ -18,9 +18,23 @@ import type { EditorView } from '@codemirror/view'
 import { Link } from '@tanstack/react-router'
 import { type KeyboardEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAstraState, useHost, useUi } from '../context'
-import { CodeEditor, type Cursor, languageFor } from '../shared/codeEditor'
+import { CodeEditor, type Cursor, type DiffCount, languageFor } from '../shared/codeEditor'
 import { AppHeader, Page } from '../shell/AppHeader'
 
+const readPref = (key: string) => {
+  try {
+    return localStorage.getItem(key)
+  } catch {
+    return null
+  }
+}
+const writePref = (key: string, value: string) => {
+  try {
+    localStorage.setItem(key, value)
+  } catch {
+    // Private windows and blocked storage: the choice just isn't remembered.
+  }
+}
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err))
 const baseName = (path: string) => path.split('/').pop() ?? path
 const parentOf = (path: string) => path.split('/').slice(0, -1).join('/')
@@ -53,9 +67,28 @@ export function demoFiles(
   return Object.keys(out).length > 0 ? out : null
 }
 
-function safeMemoryFiles(initial: Record<string, string>): FilesHost | null {
+/** The demo files as they were before the missions changed them (context and removed lines). */
+export function demoBases(s: Pick<State, 'missions' | 'results'>, repoId: string): Record<string, string> {
+  const missions = new Set(
+    Object.values(s.missions)
+      .filter((m) => m.repoId === repoId)
+      .map((m) => m.id),
+  )
+  const out: Record<string, string> = {}
+  for (const r of Object.values(s.results).filter((x) => missions.has(x.missionId))) {
+    for (const f of r.diff) {
+      out[f.path] = f.lines
+        .filter((l) => l.kind !== 'add')
+        .map((l) => l.text)
+        .join('\n')
+    }
+  }
+  return out
+}
+
+function safeMemoryFiles(initial: Record<string, string>, bases: Record<string, string>): FilesHost | null {
   try {
-    return memoryFiles(initial)
+    return memoryFiles(initial, bases)
   } catch {
     return null
   }
@@ -71,7 +104,7 @@ export function Editor() {
   const demo = useMemo(() => {
     if (host.files || !repo) return null
     const initial = demoFiles({ missions, results }, repo.id)
-    return initial ? safeMemoryFiles(initial) : null
+    return initial ? safeMemoryFiles(initial, demoBases({ missions, results }, repo.id)) : null
   }, [host.files, repo, missions, results])
 
   let body: ReactNode
@@ -140,6 +173,8 @@ interface Doc {
   text: string
   /** The text as last read or saved; the tab is dirty while `text` differs. */
   saved: string
+  /** The file as last committed (the diff's original); null when there is none, undefined until known. */
+  base?: string | null
   error: string | null
   saving: boolean
   saveError: string | null
@@ -167,6 +202,14 @@ function Workspace({
   /** Each open file's editor state (undo history, selection, folds), kept while another tab shows. */
   const states = useRef(new Map<string, EditorState>()).current
   const view = useRef<EditorView | null>(null)
+  const [showDiff, setShowDiff] = useState(() => readPref('astra.editor.diff') !== 'off')
+  const [diff, setDiff] = useState<DiffCount | null>(null)
+  const toggleDiff = () => {
+    setShowDiff((on) => {
+      writePref('astra.editor.diff', on ? 'off' : 'on')
+      return !on
+    })
+  }
   const [explorerWidth, explorerHandle] = useResizable({
     storageKey: 'astra.size.editor.explorer',
     initial: 260,
@@ -224,6 +267,10 @@ function Workspace({
     files.read(root, path).then(
       (text) => patchDoc(path, { status: 'ready', text, saved: text }),
       (err: unknown) => patchDoc(path, { status: 'error', error: message(err) }),
+    )
+    files.base?.(root, path).then(
+      (base) => patchDoc(path, { base }),
+      () => patchDoc(path, { base: null }),
     )
   }
 
@@ -403,8 +450,10 @@ function Workspace({
               key={doc.path}
               path={doc.path}
               text={doc.text}
+              original={showDiff ? (doc.base ?? doc.saved) : null}
               states={states}
               viewRef={view}
+              onDiff={setDiff}
               onChange={(text) => {
                 setArmedClose(null)
                 patchDoc(doc.path, { text })
@@ -413,7 +462,14 @@ function Workspace({
             />
           )}
         </div>
-        <StatusBar doc={doc} cursor={cursor} />
+        <StatusBar
+          doc={doc}
+          cursor={cursor}
+          diff={showDiff ? diff : null}
+          showDiff={showDiff}
+          committed={doc?.base != null}
+          onToggleDiff={toggleDiff}
+        />
       </section>
     </main>
   )
@@ -585,7 +641,21 @@ function Tree({
 
 // ── Status bar ─────────────────────────────────────────────────────────────
 
-function StatusBar({ doc, cursor }: { doc: Doc | null; cursor: Cursor }) {
+function StatusBar({
+  doc,
+  cursor,
+  diff,
+  showDiff,
+  committed,
+  onToggleDiff,
+}: {
+  doc: Doc | null
+  cursor: Cursor
+  diff: DiffCount | null
+  showDiff: boolean
+  committed: boolean
+  onToggleDiff: () => void
+}) {
   let status: ReactNode = null
   if (doc?.status === 'ready') {
     status = doc.saving ? (
@@ -611,6 +681,34 @@ function StatusBar({ doc, cursor }: { doc: Doc | null; cursor: Cursor }) {
             {doc.path}
           </Data>
           <span className="grow" />
+          {doc.status === 'ready' ? (
+            <>
+              {diff && (diff.added > 0 || diff.removed > 0) ? (
+                <Data
+                  className="text-ink-muted"
+                  title={committed ? 'Changes since the last commit' : 'Changes since the last save'}
+                >
+                  <span className="text-success">+{diff.added}</span>{' '}
+                  <span className="text-danger">−{diff.removed}</span>
+                </Data>
+              ) : null}
+              <button
+                type="button"
+                aria-pressed={showDiff}
+                title={
+                  committed ? 'Colour changes since the last commit' : 'Colour changes since the last save'
+                }
+                onClick={onToggleDiff}
+                className={buttonClass(
+                  'text',
+                  'sm',
+                  cx('h-6 px-2', showDiff ? 'text-ink' : 'text-ink-muted'),
+                )}
+              >
+                DIFF
+              </button>
+            </>
+          ) : null}
           <Spec>{languageFor(doc.path).label}</Spec>
           {doc.status === 'ready' ? (
             <Spec>
