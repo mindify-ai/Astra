@@ -1,0 +1,215 @@
+{
+  "workspaceId": "ws-local",
+  "me": "p-me",
+  "presence": [],
+  "entities": [
+    {
+      "kind": "person",
+      "id": "p-me",
+      "name": "You",
+      "initials": "ME"
+    },
+    {
+      "kind": "agent",
+      "id": "a-claude-code",
+      "name": "Claude Code",
+      "vendor": "ANTHROPIC",
+      "category": "codingAgent",
+      "transport": "CLI on this machine",
+      "adapter": {
+        "type": "acp",
+        "command": "claude-code-acp",
+        "args": []
+      },
+      "runsOn": "local",
+      "nodeId": null,
+      "commandPolicy": "askMe",
+      "status": "notConnected",
+      "requiresNetwork": true
+    },
+    {
+      "kind": "agent",
+      "id": "a-codex",
+      "name": "Codex",
+      "vendor": "OPENAI",
+      "category": "codingAgent",
+      "transport": "CLI on this machine",
+      "adapter": {
+        "type": "acp",
+        "command": "codex-acp",
+        "args": []
+      },
+      "runsOn": "local",
+      "nodeId": null,
+      "commandPolicy": "askMe",
+      "status": "notConnected",
+      "requiresNetwork": true
+    },
+    {
+      "kind": "agent",
+      "id": "a-gemini-cli",
+      "name": "Gemini CLI",
+      "vendor": "GOOGLE",
+      "category": "codingAgent",
+      "transport": "CLI on this machine",
+      "adapter": {
+        "type": "acp",
+        "command": "gemini",
+        "args": ["--experimental-acp"]
+      },
+      "runsOn": "local",
+      "nodeId": null,
+      "commandPolicy": "askMe",
+      "status": "notConnected",
+      "requiresNetwork": true
+    },
+    {
+      "kind": "agent",
+      "id": "a-cursor-cli",
+      "name": "Cursor CLI",
+      "vendor": "CURSOR",
+      "category": "codingAgent",
+      "transport": "CLI on this machine",
+      "adapter": null,
+      "runsOn": "local",
+      "nodeId": null,
+      "commandPolicy": "askMe",
+      "status": "notConnected",
+      "requiresNetwork": true
+    },
+    {
+      "kind": "agent",
+      "id": "a-opencode",
+      "name": "OpenCode",
+      "vendor": "OPEN SOURCE",
+      "category": "codingAgent",
+      "transport": "CLI on this machine",
+      "adapter": null,
+      "runsOn": "local",
+      "nodeId": null,
+      "commandPolicy": "askMe",
+      "status": "notConnected",
+      "requiresNetwork": false
+    },
+    {
+      "kind": "agent",
+      "id": "a-langgraph",
+      "name": "LangGraph",
+      "vendor": "LANGCHAIN",
+      "category": "harness",
+      "transport": "Endpoint",
+      "adapter": {
+        "type": "langgraph",
+        "endpoint": "http://localhost:2024",
+        "graph": "qa-graph"
+      },
+      "runsOn": "local",
+      "nodeId": null,
+      "commandPolicy": "askMe",
+      "status": "notConnected",
+      "requiresNetwork": false
+    },
+    {
+      "kind": "agent",
+      "id": "a-claude-agent-sdk",
+      "name": "Claude Agent SDK",
+      "vendor": "ANTHROPIC",
+      "category": "harness",
+      "transport": "Endpoint or command",
+      "adapter": null,
+      "runsOn": "local",
+      "nodeId": null,
+      "commandPolicy": "askMe",
+      "status": "notConnected",
+      "requiresNetwork": true
+    },
+    {
+      "kind": "agent",
+      "id": "a-openai-agents-sdk",
+      "name": "OpenAI Agents SDK",
+      "vendor": "OPENAI",
+      "category": "harness",
+      "transport": "Endpoint or command",
+      "adapter": null,
+      "runsOn": "local",
+      "nodeId": null,
+      "commandPolicy": "askMe",
+      "status": "notConnected",
+      "requiresNetwork": true
+    },
+    {
+      "kind": "agent",
+      "id": "a-crewai",
+      "name": "CrewAI",
+      "vendor": "CREWAI",
+      "category": "harness",
+      "transport": "Endpoint",
+      "adapter": null,
+      "runsOn": "local",
+      "nodeId": null,
+      "commandPolicy": "askMe",
+      "status": "notConnected",
+      "requiresNetwork": false
+    },
+    {
+      "kind": "agent",
+      "id": "a-mcp",
+      "name": "MCP server",
+      "vendor": "PROTOCOL",
+      "category": "protocol",
+      "transport": "URL or command",
+      "adapter": null,
+      "runsOn": "local",
+      "nodeId": null,
+      "commandPolicy": "askMe",
+      "status": "notConnected",
+      "requiresNetwork": false
+    },
+    {
+      "kind": "agent",
+      "id": "a-a2a",
+      "name": "A2A agent",
+      "vendor": "PROTOCOL",
+      "category": "protocol",
+      "transport": "Agent card URL",
+      "adapter": null,
+      "runsOn": "local",
+      "nodeId": null,
+      "commandPolicy": "askMe",
+      "status": "notConnected",
+      "requiresNetwork": true
+    },
+    {
+      "kind": "agent",
+      "id": "a-custom",
+      "name": "Custom command",
+      "vendor": "ANY CLI",
+      "category": "protocol",
+      "transport": "Reads a prompt, writes text",
+      "adapter": null,
+      "runsOn": "local",
+      "nodeId": null,
+      "commandPolicy": "askMe",
+      "status": "notConnected",
+      "requiresNetwork": false
+    },
+    {
+      "kind": "agent",
+      "id": "a-astra",
+      "name": "Astra agent",
+      "vendor": "MINDIFY AI",
+      "category": "local",
+      "transport": "Claude online, local model offline",
+      "adapter": {
+        "type": "builtin",
+        "provider": "auto",
+        "model": null
+      },
+      "runsOn": "local",
+      "nodeId": null,
+      "commandPolicy": "askMe",
+      "status": "notConnected",
+      "requiresNetwork": false
+    }
+  ]
+}

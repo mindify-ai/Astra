@@ -1,4 +1,4 @@
-import { demoSeed, MockClient } from '@astra/client'
+import { demoSeed, MockClient, starterSeed } from '@astra/client'
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
@@ -12,6 +12,16 @@ function mount(path: string, platform: Platform = 'mac') {
 }
 
 describe('desktop', () => {
+  it('a clean workspace starts at welcome with every agent ready to connect', async () => {
+    const client = new MockClient({ seed: starterSeed, latency: 0 })
+    render(<AstraApp client={client} platform="mac" history={{ memory: '/' }} />)
+    expect(await screen.findByRole('heading', { name: 'Every agent. One workspace.' })).toBeTruthy()
+    const s = client.getState()
+    expect(Object.keys(s.missions)).toHaveLength(0)
+    expect(Object.keys(s.repositories)).toHaveLength(0)
+    expect(Object.values(s.agents).every((a) => a.status === 'notConnected')).toBe(true)
+  })
+
   it('home lists what needs you, missions and connected agents', async () => {
     mount('/')
     expect(await screen.findByRole('heading', { name: 'Start a mission.' })).toBeTruthy()

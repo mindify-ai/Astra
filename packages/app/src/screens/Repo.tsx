@@ -101,13 +101,18 @@ export function Repo() {
             )
           })}
           {repos.length === 0 ? (
-            <p className="m-0 border border-line p-4 text-ink-muted">No repository matches that search.</p>
+            <p className="m-0 border border-line p-4 text-ink-muted">
+              {Object.keys(state.repositories).length === 0
+                ? 'No repositories yet. Open a local folder to add one.'
+                : 'No repository matches that search.'}
+            </p>
           ) : null}
         </div>
         <div className="flex flex-wrap items-center gap-3 border-t border-line pt-6">
           <button
             type="button"
             className={buttonClass('primary', 'md', 'px-6')}
+            disabled={!state.repositories[ui.repoId]}
             onClick={() => navigate({ to: '/setup/agents' })}
           >
             Continue →

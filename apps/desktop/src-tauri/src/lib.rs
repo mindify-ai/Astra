@@ -11,8 +11,8 @@ use astra_protocol::{Op, Presence, Snapshot};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
 
-/// The demo workspace shipped with the app so a first launch is not empty.
-const SEED: &str = include_str!("../../../../fixtures/seed.json");
+/// A first launch starts with only you and the catalog of agents you can connect: no demo data.
+const STARTER: &str = include_str!("../../../../fixtures/starter.json");
 
 struct AppState {
     node: Arc<Node>,
@@ -129,19 +129,94 @@ fn node_id(dir: &Path) -> std::io::Result<String> {
     Ok(id)
 }
 
+/// Builds this install's starter workspace: the catalog's agents run on this node, and you are named
+/// after your git (or OS) user.
+fn starter_seed(workspace_id: &str, me: &str, node_id: &str) -> Result<String, String> {
+    let mut seed: serde_json::Value = serde_json::from_str(STARTER).map_err(|e| e.to_string())?;
+    seed["workspaceId"] = workspace_id.into();
+    seed["me"] = me.into();
+    let name = display_name();
+    for entity in seed["entities"].as_array_mut().into_iter().flatten() {
+        match entity["kind"].as_str() {
+            Some("person") => {
+                entity["id"] = me.into();
+                entity["initials"] = initials(&name).into();
+                entity["name"] = name.clone().into();
+            }
+            Some("agent") => entity["nodeId"] = node_id.into(),
+            _ => {}
+        }
+    }
+    serde_json::to_string(&seed).map_err(|e| e.to_string())
+}
+
+fn display_name() -> String {
+    let git = std::process::Command::new("git")
+        .args(["config", "--global", "user.name"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
+    git.or_else(|| std::env::var("USER").ok())
+        .or_else(|| std::env::var("USERNAME").ok())
+        .map(|n| n.trim().to_string())
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| "You".into())
+}
+
+fn initials(name: &str) -> String {
+    let words: Vec<&str> = name.split_whitespace().collect();
+    let letters: String = if words.len() >= 2 {
+        words
+            .iter()
+            .take(2)
+            .filter_map(|w| w.chars().next())
+            .collect()
+    } else {
+        name.chars()
+            .filter(|c| c.is_alphanumeric())
+            .take(2)
+            .collect()
+    };
+    letters.to_uppercase()
+}
+
+/// Earlier builds filled a first launch with the design's demo workspace (and left `seed.json` next to
+/// the store). Move that store aside once so the app starts clean; nothing is deleted.
+fn retire_demo_store(dir: &Path) -> std::io::Result<()> {
+    let marker = dir.join("seed.json");
+    if !marker.exists() {
+        return Ok(());
+    }
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let backup = dir.join(format!("demo-backup-{secs}"));
+    std::fs::create_dir_all(&backup)?;
+    for name in ["astra.db", "astra.db-wal", "astra.db-shm", "seed.json"] {
+        let from = dir.join(name);
+        if from.exists() {
+            std::fs::rename(&from, backup.join(name))?;
+        }
+    }
+    Ok(())
+}
+
 async fn start_node(data_dir: PathBuf) -> Result<(Node, NodeInfo), String> {
     std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
+    retire_demo_store(&data_dir).map_err(|e| e.to_string())?;
     let settings = read_settings(&data_dir);
     let node_id = node_id(&data_dir).map_err(|e| e.to_string())?;
-    let seed_path = data_dir.join("seed.json");
-    if !seed_path.exists() {
-        std::fs::write(&seed_path, SEED).map_err(|e| e.to_string())?;
-    }
     let workspace_id = settings
         .workspace_id
         .clone()
-        .unwrap_or_else(|| "ws-mindify".into());
-    let me = settings.me.clone().unwrap_or_else(|| "p-mark".into());
+        .unwrap_or_else(|| "ws-local".into());
+    let me = settings.me.clone().unwrap_or_else(|| "p-me".into());
+    // Only read when the store is empty (a first launch).
+    let starter_path = data_dir.join("starter.json");
+    std::fs::write(&starter_path, starter_seed(&workspace_id, &me, &node_id)?)
+        .map_err(|e| e.to_string())?;
     let relay = match (settings.relay_url, settings.relay_token) {
         (Some(url), Some(token)) => Some(RelayConfig { url, token }),
         _ => None,
@@ -153,7 +228,7 @@ async fn start_node(data_dir: PathBuf) -> Result<(Node, NodeInfo), String> {
         me: me.clone(),
         runtime: cfg!(not(any(target_os = "ios", target_os = "android"))),
         relay,
-        seed_if_empty: Some(seed_path),
+        seed_if_empty: Some(starter_path),
     })
     .await
     .map_err(|e| e.to_string())?;
@@ -224,5 +299,30 @@ mod tests {
     fn formats_rfc3339() {
         assert_eq!(super::rfc3339(0), "1970-01-01T00:00:00Z");
         assert_eq!(super::rfc3339(1_763_716_320), "2025-11-21T09:12:00Z");
+    }
+
+    #[test]
+    fn initials_from_names() {
+        assert_eq!(super::initials("Mark Chen"), "MC");
+        assert_eq!(super::initials("next"), "NE");
+        assert_eq!(super::initials("You"), "YO");
+    }
+
+    #[test]
+    fn starter_has_no_demo_data() {
+        let raw = super::starter_seed("ws-x", "p-x", "n-x").expect("starter");
+        let seed: astra_protocol::Seed = serde_json::from_str(&raw).expect("parses as a seed");
+        assert_eq!(seed.workspace_id, "ws-x");
+        for e in &seed.entities {
+            let v = serde_json::to_value(e).expect("json");
+            match v["kind"].as_str() {
+                Some("person") => assert_eq!(v["id"], "p-x"),
+                Some("agent") => {
+                    assert_eq!(v["nodeId"], "n-x");
+                    assert_eq!(v["status"], "notConnected");
+                }
+                other => panic!("unexpected entity in starter: {other:?}"),
+            }
+        }
     }
 }

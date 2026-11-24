@@ -152,7 +152,10 @@ export function AstraProvider({
     }
   }, [platform, narrow, windowActions])
 
-  const [repoId, setRepo] = useState(() => read('astra.repo') ?? 'r-gateway')
+  const [savedRepoId, setRepo] = useState(() => read('astra.repo') ?? '')
+  const repositories = useSyncExternalStore(client.subscribe, () => client.getState().repositories)
+  // A remembered repository may not exist in this workspace (or there are none yet): use the first one.
+  const repoId = repositories[savedRepoId] ? savedRepoId : (Object.keys(repositories)[0] ?? '')
   const [lastMissionId, setLast] = useState(() => read('astra.lastMission'))
   const [shareMissionId, openShare] = useState<string | null>(null)
   const ui = useMemo<UiState>(

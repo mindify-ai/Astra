@@ -1,5 +1,5 @@
 import { AstraApp, type Platform } from '@astra/app'
-import { demoSeed, isTauri, MockClient, TauriClient } from '@astra/client'
+import { isTauri, MockClient, starterSeed, TauriClient } from '@astra/client'
 import { writeText } from '@tauri-apps/plugin-clipboard-manager'
 import { open } from '@tauri-apps/plugin-dialog'
 import { platform as osPlatform } from '@tauri-apps/plugin-os'
@@ -26,12 +26,12 @@ function detectPlatform(): Platform {
 const root = createRoot(document.getElementById('root')!)
 
 // The Vite dev server (:1420) can also be opened in a plain browser, where there is no Tauri bridge
-// and no local node. Fall back to the in-browser demo workspace there instead of failing on `invoke`.
+// and no local node. Fall back to an in-browser workspace (no demo data) there instead of failing on `invoke`.
 if (!isTauri()) {
-  console.info('Astra: not running inside the Tauri shell; using the demo workspace.')
+  console.info('Astra: not running inside the Tauri shell; using an in-browser workspace.')
   root.render(
     <StrictMode>
-      <AstraApp client={new MockClient({ seed: demoSeed })} platform={detectPlatform()} history="hash" />
+      <AstraApp client={new MockClient({ seed: starterSeed })} platform={detectPlatform()} history="hash" />
     </StrictMode>,
   )
 } else {

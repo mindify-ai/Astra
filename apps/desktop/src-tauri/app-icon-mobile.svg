@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- iOS and Android icon: full bleed (the OS applies its own mask), same mark and colours as app-icon.svg. -->
+  <defs>
+    <linearGradient id="ring" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#B8B8B8"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#8CD44A" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#8CD44A" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="moon" cx="0.35" cy="0.3" r="0.75">
+      <stop offset="0" stop-color="#B5EC7E"/>
+      <stop offset="1" stop-color="#7AC142"/>
+    </radialGradient>
+  </defs>
+  <rect width="1024" height="1024" fill="#0D0D0D"/>
+  <circle cx="490" cy="534" r="364" fill="none" stroke="#FFFFFF" stroke-opacity="0.09" stroke-width="5"/>
+  <circle cx="490" cy="534" r="470" fill="none" stroke="#FFFFFF" stroke-opacity="0.05" stroke-width="5"/>
+  <circle cx="711" cy="408" r="206" fill="url(#glow)"/>
+  <circle cx="490" cy="534" r="252" fill="none" stroke="url(#ring)" stroke-width="53"/>
+  <circle cx="711" cy="408" r="109" fill="#0D0D0D"/>
+  <circle cx="711" cy="408" r="79" fill="url(#moon)"/>
+</svg>

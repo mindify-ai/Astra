@@ -7,7 +7,7 @@ import {
   Outlet,
   type RouterHistory,
 } from '@tanstack/react-router'
-import { usePlatform } from './context'
+import { useAstraState, usePlatform } from './context'
 import { MobileAgents, MobileHome, MobilePeople, MobileReview, MobileThread } from './mobile/MobileScreens'
 import { Board } from './screens/Board'
 import { Connect } from './screens/Connect'
@@ -36,10 +36,16 @@ function Adaptive({ desktop, mobile }: { desktop: React.ReactNode; mobile: React
   return <>{layout === 'mobile' ? mobile : desktop}</>
 }
 
+/** A workspace with no repository yet (a first launch) starts at Welcome rather than an empty Home. */
+function DesktopHome() {
+  const s = useAstraState()
+  return Object.keys(s.repositories).length === 0 ? <Welcome /> : <Home />
+}
+
 const homeRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/',
-  component: () => <Adaptive desktop={<Home />} mobile={<MobileHome />} />,
+  component: () => <Adaptive desktop={<DesktopHome />} mobile={<MobileHome />} />,
 })
 const welcomeRoute = createRoute({ getParentRoute: () => rootRoute, path: '/welcome', component: Welcome })
 const repoRoute = createRoute({
