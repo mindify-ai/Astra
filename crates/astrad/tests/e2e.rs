@@ -191,6 +191,7 @@ async fn mission_over_relay_with_remote_approval_and_merge() {
             node_id: Some("n-desk".into()),
             stats: None,
             created_at: now_rfc3339(),
+            archived_at: None,
         }),
         OpBody::put(MissionAgent {
             id: "ma-1".into(),

@@ -1,5 +1,5 @@
 import { ulid } from './hlc'
-import { mayDecide, maySteer } from './policy'
+import { mayDecide, mayManage, maySteer } from './policy'
 import { type SeedFile, Store, stateFromSeed } from './store'
 import type {
   Command,
@@ -207,8 +207,67 @@ export class MockClient extends Store {
           return this.addAgent(op, node, cmd.missionAgentId)
         case 'removeAgent':
           return this.removeAgent(op, node, cmd.missionAgentId)
+        case 'archiveMission':
+          return this.archiveMission(op, node, cmd.missionId, cmd.archived)
+        case 'deleteMission':
+          return this.deleteMission(op, node, cmd.missionId)
       }
     })
+  }
+
+  private archiveMission(op: Op, node: Id, missionId: Id, archived: boolean) {
+    const s = this.state
+    const mission = s.missions[missionId]
+    if (!mission) return this.ok(node, op, `unknown mission ${missionId}`)
+    if (!mayManage(s, missionId, op.actor))
+      return this.ok(node, op, `only the owner can archive or delete mission ${missionId}`)
+    if (!archived) {
+      if (mission.archivedAt) this.node(node, [this.patch('mission', missionId, { archivedAt: null })])
+      return this.ok(node, op)
+    }
+    if (mission.archivedAt) return this.ok(node, op)
+    const bodies: OpBody[] = [
+      this.patch('mission', missionId, {
+        archivedAt: new Date().toISOString(),
+        ...(mission.status === 'working' ? { status: 'needsYou' } : {}),
+      }),
+    ]
+    for (const a of Object.values(s.approvals))
+      if (a.missionId === missionId && a.state === 'pending')
+        bodies.push(
+          this.patch('approval', a.id, {
+            state: 'denied',
+            decidedBy: op.actor,
+            decidedAt: new Date().toISOString(),
+          }),
+        )
+    for (const ma of this.agentsOf(s, missionId))
+      if (ma.status === 'working' || ma.status === 'needsYou')
+        bodies.push(this.patch('missionAgent', ma.id, { status: 'idle', statusDetail: 'stopped: archived' }))
+    this.node(node, bodies)
+    return this.ok(node, op)
+  }
+
+  private deleteMission(op: Op, node: Id, missionId: Id) {
+    const s = this.state
+    if (!s.missions[missionId]) return this.ok(node, op, `unknown mission ${missionId}`)
+    if (!mayManage(s, missionId, op.actor))
+      return this.ok(node, op, `only the owner can archive or delete mission ${missionId}`)
+    const del = (entityKind: Entity['kind'], id: Id): OpBody => ({ type: 'delete', entityKind, id })
+    const bodies: OpBody[] = []
+    const of = <T extends { id: Id; missionId: Id }>(kind: Entity['kind'], m: Record<Id, T>) => {
+      for (const e of Object.values(m)) if (e.missionId === missionId) bodies.push(del(kind, e.id))
+    }
+    of('missionAgent', s.missionAgents)
+    of('task', s.tasks)
+    of('message', s.messages)
+    of('approval', s.approvals)
+    of('result', s.results)
+    of('merge', s.merges)
+    of('membership', s.memberships)
+    bodies.push(del('mission', missionId))
+    this.node(node, bodies)
+    return this.ok(node, op)
   }
 
   /** The checks the runtime makes before a mission's agents change (see `editable_mission`). */
@@ -219,6 +278,7 @@ export class MockClient extends Store {
     if (!ma || !mission) return `unknown agent ${maId}`
     if (!maySteer(s, mission.id, op.actor)) return `${op.actor} may not steer mission ${mission.id}`
     if (mission.status === 'merged') return 'the mission is already merged'
+    if (mission.archivedAt) return 'the mission is archived'
     return { ma, mission }
   }
 

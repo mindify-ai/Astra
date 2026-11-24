@@ -14,7 +14,7 @@ use crate::adapters::{
     self, AgentAdapter, AgentContext, AgentControl, AgentEvent, Approver, PermissionRequest,
 };
 use crate::git;
-use crate::policy::{may_decide, may_steer};
+use crate::policy::{may_decide, may_manage, may_steer};
 use crate::process::LogRing;
 use crate::secrets::SecretStore;
 
@@ -75,11 +75,15 @@ enum Handoff {
     Switch,
     /// It leaves the mission; the turn ends without an error so the mission carries on.
     Remove,
+    /// Its mission was archived or deleted: the turn ends and the mission's run stops quietly.
+    Halt,
 }
 
 const STOP_TIMEOUT: Duration = Duration::from_secs(10);
 /// `run_turn`'s error for an agent taken off its mission mid-turn (turned into a quiet success).
 const REMOVED: &str = "removed from the mission";
+/// The error a mission's run ends with when it was archived or deleted (reported nowhere).
+const HALTED: &str = "the mission was archived or deleted";
 
 struct LiveAgent {
     mission_id: String,
@@ -113,6 +117,8 @@ struct Inner {
     stopping: Mutex<HashMap<String, Handoff>>,
     /// Mission agents inside `run_turn` (a switch hands their turn to the new agent).
     in_turn: Mutex<HashSet<String>>,
+    /// Missions being deleted: nothing new may start in them.
+    halted: Mutex<HashSet<String>>,
     cmd_tx: mpsc::UnboundedSender<Op>,
 }
 
@@ -143,6 +149,7 @@ impl Orchestrator {
             executing: Mutex::new(HashSet::new()),
             stopping: Mutex::new(HashMap::new()),
             in_turn: Mutex::new(HashSet::new()),
+            halted: Mutex::new(HashSet::new()),
             cmd_tx,
         });
         let orch = Orchestrator { inner };
@@ -313,6 +320,11 @@ impl Orchestrator {
             Command::RemoveAgent { mission_agent_id } => {
                 self.remove_agent(&mission_agent_id, &actor).await
             }
+            Command::ArchiveMission {
+                mission_id,
+                archived,
+            } => self.archive_mission(&mission_id, archived, &actor).await,
+            Command::DeleteMission { mission_id } => self.delete_mission(&mission_id, &actor).await,
         };
         if let Err(e) = &result {
             tracing::warn!(op = %op.id, error = %e, "command failed");
@@ -505,13 +517,15 @@ impl Orchestrator {
     ) -> CmdResult {
         let (exists, steerable, target) = read(self.host(), |s| {
             (
-                s.missions.contains_key(mission_id),
+                s.missions
+                    .get(mission_id)
+                    .is_some_and(|m| m.archived_at.is_none()),
                 may_steer(s, mission_id, actor),
                 to.map(|t| s.mission_agents.get(t).cloned()),
             )
         });
         if !exists {
-            return Err(format!("unknown mission {mission_id}"));
+            return Err(format!("unknown or archived mission {mission_id}"));
         }
         if !steerable {
             return Err(format!("{actor} may not steer mission {mission_id}"));
@@ -592,7 +606,9 @@ impl Orchestrator {
         );
         let o = self.clone();
         tokio::spawn(async move {
-            if let Err(e) = o.run_turn(&ma, &prompt, &worktree, None).await {
+            if let Err(e) = o.run_turn(&ma, &prompt, &worktree, None).await
+                && e != HALTED
+            {
                 o.emit(vec![OpBody::patch(
                     EntityKind::MissionAgent,
                     &ma.id,
@@ -1058,6 +1074,9 @@ impl Orchestrator {
             &ma.id,
             fields,
         )]);
+        if self.is_halted(&ma.mission_id) {
+            return Err(HALTED.into());
+        }
         let _ = self.take_turn_text(&ma.id);
         if let Ok(mut t) = self.inner.in_turn.lock() {
             t.insert(ma.id.clone());
@@ -1083,11 +1102,17 @@ impl Orchestrator {
                     );
                 }
                 Some(Handoff::Remove) => break Err(REMOVED.to_string()),
+                Some(Handoff::Halt) => break Err(HALTED.to_string()),
                 None => break outcome,
             }
         };
         if let Ok(mut t) = self.inner.in_turn.lock() {
             t.remove(&ma.id);
+        }
+        if matches!(&outcome, Err(e) if e == HALTED) {
+            // Archived or deleted: write nothing more about this turn.
+            let _ = self.take_turn_text(&ma.id);
+            return Err(HALTED.into());
         }
         if matches!(&outcome, Err(e) if e == REMOVED) {
             // Leaving the mission is not a failure: its task closes and the mission carries on.
@@ -1271,6 +1296,9 @@ impl Orchestrator {
         if mission.status == MissionStatus::Merged {
             return Err("the mission is already merged".into());
         }
+        if mission.archived_at.is_some() {
+            return Err("the mission is archived".into());
+        }
         Ok(mission)
     }
 
@@ -1325,6 +1353,216 @@ impl Orchestrator {
         Ok(())
     }
 
+    /// Whether nothing may run in this mission any more: it is archived, deleted, or being deleted.
+    fn is_halted(&self, mission_id: &str) -> bool {
+        self.inner
+            .halted
+            .lock()
+            .map(|h| h.contains(mission_id))
+            .unwrap_or(false)
+            || read(self.host(), |s| {
+                s.missions
+                    .get(mission_id)
+                    .is_none_or(|m| m.archived_at.is_some())
+            })
+    }
+
+    /// Stops everything running in a mission: pending approvals are denied (the agents waiting on them give
+    /// up) and live sessions end. Returns the mission agents that were running.
+    async fn stop_mission(&self, mission_id: &str, actor: &str) -> Vec<String> {
+        let pending: Vec<String> = read(self.host(), |s| {
+            s.approvals
+                .values()
+                .filter(|a| a.mission_id == mission_id && a.state == ApprovalState::Pending)
+                .map(|a| a.id.clone())
+                .collect()
+        });
+        for id in &pending {
+            if let Some(tx) = self
+                .inner
+                .approvals
+                .lock()
+                .ok()
+                .and_then(|mut a| a.remove(id))
+            {
+                let _ = tx.send(false);
+            }
+            self.emit(vec![OpBody::patch(
+                EntityKind::Approval,
+                id,
+                [
+                    ("state", json!("denied")),
+                    ("decidedBy", json!(actor)),
+                    ("decidedAt", json!(now_rfc3339())),
+                ],
+            )]);
+        }
+        let live: Vec<String> = self
+            .inner
+            .agents
+            .lock()
+            .map(|a| {
+                a.iter()
+                    .filter(|(_, l)| l.mission_id == mission_id)
+                    .map(|(k, _)| k.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
+        for id in &live {
+            if let Err(e) = self.stop_session(id, Handoff::Halt).await {
+                tracing::warn!(agent = %id, error = %e, "could not stop agent");
+            }
+        }
+        live
+    }
+
+    fn owned_mission(&self, mission_id: &str, actor: &str) -> Result<Mission, String> {
+        let (mission, manage) = read(self.host(), |s| {
+            (
+                s.missions.get(mission_id).cloned(),
+                may_manage(s, mission_id, actor),
+            )
+        });
+        let mission = mission.ok_or_else(|| format!("unknown mission {mission_id}"))?;
+        if !manage {
+            return Err(format!(
+                "only the owner can archive or delete mission {mission_id}"
+            ));
+        }
+        Ok(mission)
+    }
+
+    /// Archives a mission (its agents stop; it leaves the active lists) or brings it back.
+    async fn archive_mission(&self, mission_id: &str, archived: bool, actor: &str) -> CmdResult {
+        let mission = self.owned_mission(mission_id, actor)?;
+        if !archived {
+            if mission.archived_at.is_some() {
+                self.emit(vec![OpBody::patch(
+                    EntityKind::Mission,
+                    mission_id,
+                    [("archivedAt", Value::Null)],
+                )]);
+            }
+            return Ok(());
+        }
+        if mission.archived_at.is_some() {
+            return Ok(());
+        }
+        // Archive first, so nothing new starts while the running agents stop.
+        let mut fields = vec![("archivedAt", json!(now_rfc3339()))];
+        if mission.status == MissionStatus::Working {
+            fields.push(("status", json!("needsYou")));
+        }
+        self.emit(vec![OpBody::patch(EntityKind::Mission, mission_id, fields)]);
+        let stopped = self.stop_mission(mission_id, actor).await;
+        self.emit(
+            stopped
+                .iter()
+                .map(|id| {
+                    OpBody::patch(
+                        EntityKind::MissionAgent,
+                        id,
+                        [
+                            ("status", json!("idle")),
+                            ("statusDetail", json!("stopped: archived")),
+                        ],
+                    )
+                })
+                .collect(),
+        );
+        Ok(())
+    }
+
+    /// Deletes a mission and everything in it. Its worktrees are removed; its branches stay in the repository.
+    async fn delete_mission(&self, mission_id: &str, actor: &str) -> CmdResult {
+        let mission = self.owned_mission(mission_id, actor)?;
+        if let Ok(mut h) = self.inner.halted.lock() {
+            h.insert(mission_id.to_string());
+        }
+        let stopped = self.stop_mission(mission_id, actor).await;
+        if let Ok(mut streams) = self.inner.streams.lock() {
+            for id in &stopped {
+                streams.remove(id);
+            }
+        }
+        let repo_path = read(self.host(), |s| {
+            s.repositories
+                .get(&mission.repo_id)
+                .and_then(|r| r.path.clone())
+        })
+        .map(|p| git::expand_home(&p));
+        let wt_root = self
+            .inner
+            .config
+            .data_dir
+            .join("worktrees")
+            .join(sanitize(mission_id));
+        let _ = blocking(move || -> Result<(), String> {
+            if let (Some(repo), Ok(rd)) = (repo_path, std::fs::read_dir(&wt_root)) {
+                for e in rd.flatten() {
+                    let _ = git::remove_worktree(&repo, &e.path());
+                }
+            }
+            let _ = std::fs::remove_dir_all(&wt_root);
+            Ok(())
+        })
+        .await;
+        let mut ops: Vec<OpBody> = read(self.host(), |s| {
+            let mut ids: Vec<(EntityKind, String)> = Vec::new();
+            ids.extend(
+                s.mission_agents
+                    .values()
+                    .filter(|e| e.mission_id == mission_id)
+                    .map(|e| (EntityKind::MissionAgent, e.id.clone())),
+            );
+            ids.extend(
+                s.tasks
+                    .values()
+                    .filter(|e| e.mission_id == mission_id)
+                    .map(|e| (EntityKind::Task, e.id.clone())),
+            );
+            ids.extend(
+                s.messages
+                    .values()
+                    .filter(|e| e.mission_id == mission_id)
+                    .map(|e| (EntityKind::Message, e.id.clone())),
+            );
+            ids.extend(
+                s.approvals
+                    .values()
+                    .filter(|e| e.mission_id == mission_id)
+                    .map(|e| (EntityKind::Approval, e.id.clone())),
+            );
+            ids.extend(
+                s.results
+                    .values()
+                    .filter(|e| e.mission_id == mission_id)
+                    .map(|e| (EntityKind::Result, e.id.clone())),
+            );
+            ids.extend(
+                s.merges
+                    .values()
+                    .filter(|e| e.mission_id == mission_id)
+                    .map(|e| (EntityKind::Merge, e.id.clone())),
+            );
+            ids.extend(
+                s.memberships
+                    .values()
+                    .filter(|e| e.mission_id == mission_id)
+                    .map(|e| (EntityKind::Membership, e.id.clone())),
+            );
+            ids.into_iter()
+                .map(|(entity_kind, id)| OpBody::Delete { entity_kind, id })
+                .collect()
+        });
+        ops.push(OpBody::Delete {
+            entity_kind: EntityKind::Mission,
+            id: mission_id.to_string(),
+        });
+        self.emit(ops);
+        Ok(())
+    }
+
     /// Starts an agent the client just put on a mission that is already under way. One added before the
     /// mission starts is picked up by `startMission`.
     fn add_agent(&self, ma_id: &str, actor: &str) -> CmdResult {
@@ -1344,7 +1582,9 @@ impl Orchestrator {
         let prompt = prompt_for(ma.role, &mission, "");
         let o = self.clone();
         tokio::spawn(async move {
-            if let Err(e) = o.run_turn(&ma, &prompt, &worktree, None).await {
+            if let Err(e) = o.run_turn(&ma, &prompt, &worktree, None).await
+                && e != HALTED
+            {
                 o.emit(vec![OpBody::patch(
                     EntityKind::MissionAgent,
                     &ma.id,
@@ -1454,6 +1694,9 @@ impl Orchestrator {
 
     fn start_mission(&self, mission_id: &str) -> CmdResult {
         let (mission, repo, agents, path) = self.mission_context(mission_id)?;
+        if mission.archived_at.is_some() {
+            return Err("the mission is archived".into());
+        }
         if !matches!(
             mission.status,
             MissionStatus::Draft | MissionStatus::NeedsYou | MissionStatus::Working
@@ -1478,6 +1721,10 @@ impl Orchestrator {
                 MissionMode::Race => o.run_race(&mission, &repo, &agents, &path).await,
             };
             if let Err(e) = r {
+                if e == HALTED {
+                    tracing::info!(mission = %mission.id, "mission stopped: archived or deleted");
+                    return;
+                }
                 tracing::warn!(mission = %mission.id, error = %e, "mission failed");
                 let author = agents.first().map(|a| a.id.clone()).unwrap_or_default();
                 o.emit(vec![
@@ -1704,6 +1951,9 @@ impl Orchestrator {
             runs.push(async move { o.run_turn(&ma, &prompt, &wt, Some(&task)).await });
         }
         let outcomes = futures::future::join_all(runs).await;
+        if self.is_halted(&mission.id) {
+            return Err(HALTED.into());
+        }
 
         let mut results = Vec::new();
         for ((ma, label, branch, wt), outcome) in entries.into_iter().zip(outcomes) {

@@ -22,3 +22,8 @@ export function maySteer(s: State, missionId: Id, actor: Id): boolean {
   const access = s.memberships[`${missionId}:${actor}`]?.access
   return access === 'steer' || access === 'owner'
 }
+
+/** May `actor` archive or delete the mission? Only its owner. */
+export function mayManage(s: State, missionId: Id, actor: Id): boolean {
+  return s.missions[missionId]?.ownerId === actor
+}

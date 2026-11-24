@@ -56,6 +56,14 @@ pub fn may_decide(
 }
 
 /// Whether `actor` may steer (has owner or steer access).
+/// Whether `actor` may archive or delete a mission: only its owner.
+pub fn may_manage(state: &State, mission_id: &str, actor: &str) -> bool {
+    state
+        .missions
+        .get(mission_id)
+        .is_some_and(|m| m.owner_id == actor)
+}
+
 pub fn may_steer(state: &State, mission_id: &str, actor: &str) -> bool {
     state
         .missions

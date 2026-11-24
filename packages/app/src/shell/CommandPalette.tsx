@@ -2,6 +2,7 @@ import { cx, Spec } from '@astra/ui'
 import { useNavigate } from '@tanstack/react-router'
 import { type KeyboardEvent, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useAstraState, useHost, usePlatform, useUi } from '../context'
+import { features } from '../features'
 import { currentMissionId, missionNo, missionRoute, missionStatus, orderedMissions } from '../select'
 
 interface Item {
@@ -176,7 +177,7 @@ export function CommandPalette() {
         keywords: 'shell console',
         run: () => ui.setTerminalOpen(!ui.terminalOpen),
       })
-    if (cm)
+    if (cm && features.share)
       out.push({
         id: 'share',
         group: 'Actions',

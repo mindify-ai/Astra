@@ -3,6 +3,7 @@ import { AvatarStack, buttonClass, cx, LogoMark, Select, Spec, WindowControls } 
 import { Link } from '@tanstack/react-router'
 import { type ReactNode, useEffect, useRef, useState } from 'react'
 import { useAstraState, useConnectivity, useHost, usePlatform, useUi } from '../context'
+import { features } from '../features'
 import { currentMissionId } from '../select'
 import { PaletteButton } from './CommandPalette'
 import { TerminalButton } from './Terminal'
@@ -226,6 +227,7 @@ export function ShareButton({ missionId }: { missionId: string | null }) {
   const state = useAstraState()
   const target =
     missionId && state.missions[missionId] ? missionId : currentMissionId(state, ui.lastMissionId)
+  if (!features.share) return null
   return (
     <button
       type="button"

@@ -64,6 +64,16 @@ pub enum Command {
     RemoveAgent {
         mission_agent_id: String,
     },
+    /// Archive a mission (stop its agents, hide it from the active lists) or bring it back. Owner only.
+    ArchiveMission {
+        mission_id: String,
+        archived: bool,
+    },
+    /// Delete a mission and everything in it (its agents are stopped, its worktrees removed; branches stay in
+    /// the repository). Owner only.
+    DeleteMission {
+        mission_id: String,
+    },
 }
 
 /// The payload of an op (tagged by `type`).

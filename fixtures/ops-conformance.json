@@ -448,6 +448,70 @@
           "fields": null
         }
       ]
+    },
+    {
+      "name": "archiveMission: the command changes nothing; the node's archivedAt patch does",
+      "initial": [
+        {
+          "kind": "mission",
+          "id": "m-1",
+          "number": 1,
+          "title": "T",
+          "shortName": "T",
+          "goal": "G",
+          "mode": "split",
+          "repoId": "r-1",
+          "baseBranch": "main",
+          "branch": "astra/t",
+          "status": "working",
+          "approvalPolicy": "owner",
+          "ownerId": "p-mark",
+          "nodeId": "n-1",
+          "stats": null,
+          "createdAt": "2026-11-21T09:00:00Z",
+          "archivedAt": null
+        }
+      ],
+      "ops": [
+        {
+          "id": "01J0000000000000000000000X",
+          "hlc": "0001732180000100:000000:n1",
+          "actor": "p-mark",
+          "body": {
+            "type": "command",
+            "node": "n-1",
+            "command": {
+              "type": "archiveMission",
+              "missionId": "m-1",
+              "archived": true
+            }
+          }
+        },
+        {
+          "id": "01J0000000000000000000000Y",
+          "hlc": "0001732180000200:000000:n-1",
+          "actor": "n-1",
+          "body": {
+            "type": "patch",
+            "entityKind": "mission",
+            "id": "m-1",
+            "fields": {
+              "archivedAt": "2026-11-24T10:00:00Z",
+              "status": "needsYou"
+            }
+          }
+        }
+      ],
+      "expect": [
+        {
+          "kind": "mission",
+          "id": "m-1",
+          "fields": {
+            "archivedAt": "2026-11-24T10:00:00Z",
+            "status": "needsYou"
+          }
+        }
+      ]
     }
   ],
   "rules": [

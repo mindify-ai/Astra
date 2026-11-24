@@ -210,6 +210,9 @@ pub struct Mission {
     pub node_id: Option<String>,
     pub stats: Option<DiffStats>,
     pub created_at: String,
+    /// When the owner archived it (hidden from the active lists, its agents stopped); null when active.
+    #[serde(default)]
+    pub archived_at: Option<String>,
 }
 
 /// An agent assigned to a mission with a role.

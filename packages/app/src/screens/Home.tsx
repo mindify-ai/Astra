@@ -28,7 +28,12 @@ export function useNeedsYou() {
       }
     })
   const picks = Object.values(s.missions)
-    .filter((m) => m.status === 'needsYou' && Object.values(s.results).some((r) => r.missionId === m.id))
+    .filter(
+      (m) =>
+        !m.archivedAt &&
+        m.status === 'needsYou' &&
+        Object.values(s.results).some((r) => r.missionId === m.id),
+    )
     .map((m) => {
       const results = Object.values(s.results).filter((r) => r.missionId === m.id)
       const names = results

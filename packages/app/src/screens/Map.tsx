@@ -36,6 +36,7 @@ import {
   missionNo,
   personName,
 } from '../select'
+import { ArchivedBanner, MissionActions } from '../shared/missionActions'
 import { AddAgentForm, AgentControls, useCanChangeTeam } from '../shared/missionTeam'
 import { AppHeader, NewMissionButton, Page, ShareButton } from '../shell/AppHeader'
 import { MissionNotFound, useMissionPresence } from './common'
@@ -340,6 +341,7 @@ export function MapView({ missionId }: { missionId: string }) {
           people={members(s, missionId).map((p) => p.person)}
           actions={
             <>
+              <MissionActions missionId={missionId} />
               <ShareButton missionId={missionId} />
               <NewMissionButton />
             </>
@@ -349,6 +351,7 @@ export function MapView({ missionId }: { missionId: string }) {
     >
       <div className="flex grow flex-wrap">
         <main className="flex min-w-0 flex-[999_1_560px] flex-col">
+          <ArchivedBanner missionId={missionId} />
           <div className="flex flex-wrap items-end justify-between gap-x-8 gap-y-4 px-8 py-6">
             <div className="flex flex-col gap-2">
               <Eyebrow>Mission {missionNo(mission)}</Eyebrow>

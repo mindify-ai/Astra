@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import { AstraApp } from '../src'
 import type { Platform } from '../src/context'
+import { features } from '../src/features'
 
 function mount(path: string, platform: Platform = 'mac') {
   const client = new MockClient({ seed: demoSeed, latency: 0 })
@@ -128,12 +129,23 @@ describe('desktop', () => {
     expect(((await screen.findByLabelText('Goal')) as HTMLTextAreaElement).value).toBe('Add dark mode')
   })
 
-  it('opens the people panel from SHARE and changes access', async () => {
-    const { client } = mount('/missions/m-014')
-    const user = userEvent.setup()
-    await user.click(await screen.findByRole('button', { name: 'SHARE' }))
-    await user.selectOptions(await screen.findByLabelText('Access for Jo'), 'steer')
-    expect(client.getState().memberships['m-014:p-jo']?.access).toBe('steer')
+  it('hides SHARE while the feature is off', async () => {
+    mount('/missions/m-014')
+    await screen.findByRole('list', { name: 'Thread' })
+    expect(screen.queryByRole('button', { name: 'SHARE' })).toBeNull()
+  })
+
+  it('opens the people panel from SHARE and changes access (when sharing is on)', async () => {
+    features.share = true
+    try {
+      const { client } = mount('/missions/m-014')
+      const user = userEvent.setup()
+      await user.click(await screen.findByRole('button', { name: 'SHARE' }))
+      await user.selectOptions(await screen.findByLabelText('Access for Jo'), 'steer')
+      expect(client.getState().memberships['m-014:p-jo']?.access).toBe('steer')
+    } finally {
+      features.share = false
+    }
   })
 
   it.each(['mac', 'windows', 'linux'] as const)('draws %s window controls', async (platform) => {

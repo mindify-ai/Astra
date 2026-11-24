@@ -110,6 +110,8 @@ export interface Mission {
   nodeId: string | null
   stats: DiffStats | null
   createdAt: string
+  /** When the owner archived it; null when active. */
+  archivedAt: string | null
 }
 
 export interface MissionAgent {
@@ -300,6 +302,8 @@ export type Command =
   | { type: 'switchAgent'; missionAgentId: string; agentId: string }
   | { type: 'addAgent'; missionAgentId: string }
   | { type: 'removeAgent'; missionAgentId: string }
+  | { type: 'archiveMission'; missionId: string; archived: boolean }
+  | { type: 'deleteMission'; missionId: string }
 
 export type OpBody =
   | { type: 'put'; entity: Entity }

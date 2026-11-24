@@ -2,7 +2,17 @@ import type { Task, TaskColumn } from '@astra/client'
 import { Avatar, Card, cx, Markdown, SectionHeading, Spec } from '@astra/ui'
 import { Link } from '@tanstack/react-router'
 import { useAstraState, useUi } from '../context'
-import { agentOf, columnStatus, connectedAgents, missionNo, personName, roleName } from '../select'
+import {
+  agentOf,
+  archivedMissions,
+  columnStatus,
+  connectedAgents,
+  missionNo,
+  orderedMissions,
+  personName,
+  roleName,
+} from '../select'
+import { MissionActions } from '../shared/missionActions'
 import { ApprovalActions } from '../shared/thread'
 import { AppHeader, NewMissionButton, Page, ShareButton } from '../shell/AppHeader'
 
@@ -65,7 +75,8 @@ function TaskCard({ task }: { task: Task }) {
 export function Board() {
   const s = useAstraState()
   const ui = useUi()
-  const missions = Object.values(s.missions).filter((m) => m.repoId === ui.repoId)
+  const missions = orderedMissions(s, ui.repoId)
+  const archived = archivedMissions(s, ui.repoId)
   const ids = new Set(missions.map((m) => m.id))
   const tasks = Object.values(s.tasks)
     .filter((t) => ids.has(t.missionId))
@@ -122,6 +133,34 @@ export function Board() {
           )
         })}
       </main>
+      {archived.length > 0 ? (
+        <section
+          aria-label="Archived missions"
+          className="flex flex-col gap-2 border-t border-line px-8 py-6"
+        >
+          <SectionHeading tone="idle" className="mb-1">
+            Archived · {archived.length}
+          </SectionHeading>
+          <ul className="m-0 flex list-none flex-col border-t border-line p-0">
+            {archived.map((m) => (
+              <li
+                key={m.id}
+                className="flex min-h-11 flex-wrap items-center gap-x-4 gap-y-1 border-b border-line-subtle py-1"
+              >
+                <Link
+                  to="/missions/$missionId"
+                  params={{ missionId: m.id }}
+                  className="flex-[1_1_280px] text-ink no-underline hover:underline"
+                >
+                  {m.title}
+                </Link>
+                <Spec>{missionNo(m)}</Spec>
+                <MissionActions missionId={m.id} compact />
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
     </Page>
   )
 }

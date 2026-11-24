@@ -81,6 +81,7 @@ export async function createMission(client: AstraClient, draft: MissionDraft): P
       nodeId,
       stats: null,
       createdAt: new Date().toISOString(),
+      archivedAt: null,
     },
     ...draft.agents.map(
       (a, i): MissionAgent => ({
@@ -262,6 +263,28 @@ export async function saveAgentType(
 /** Deletes a custom agent type. Agents already added as this type keep their role and agent. */
 export function deleteAgentType(client: AstraClient, agentTypeId: Id) {
   return client.submit([{ type: 'delete', entityKind: 'agentType', id: agentTypeId }])
+}
+
+/** Archives a mission (its agents stop and it leaves the active lists) or brings it back. Owner only. */
+export async function archiveMission(
+  client: AstraClient,
+  missionId: Id,
+  archived = true,
+): Promise<CommandOutcome | null> {
+  const state = client.getState()
+  const ops = await client.submit([
+    command(nodeForMission(state, missionId), { type: 'archiveMission', missionId, archived }),
+  ])
+  return outcomeOf(client, ops)
+}
+
+/** Deletes a mission and everything in it (its branches stay in the repository). Owner only. */
+export async function deleteMission(client: AstraClient, missionId: Id): Promise<CommandOutcome | null> {
+  const state = client.getState()
+  const ops = await client.submit([
+    command(nodeForMission(state, missionId), { type: 'deleteMission', missionId }),
+  ])
+  return outcomeOf(client, ops)
 }
 
 /** Takes an agent off its mission; resolves with the node's answer. */

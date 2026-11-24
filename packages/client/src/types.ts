@@ -71,6 +71,8 @@ export interface Mission {
   nodeId: Id | null
   stats: DiffStats | null
   createdAt: Timestamp
+  /** When the owner archived it; null when active. */
+  archivedAt: Timestamp | null
 }
 
 export type Role = 'planner' | 'builder' | 'tester' | 'reviewer' | 'writer'
@@ -251,6 +253,8 @@ export type Command =
   | { type: 'switchAgent'; missionAgentId: Id; agentId: Id }
   | { type: 'addAgent'; missionAgentId: Id }
   | { type: 'removeAgent'; missionAgentId: Id }
+  | { type: 'archiveMission'; missionId: Id; archived: boolean }
+  | { type: 'deleteMission'; missionId: Id }
 
 export type OpBody =
   | { type: 'put'; entity: Entity }

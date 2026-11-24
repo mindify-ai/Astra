@@ -307,7 +307,8 @@
         "additions": 182,
         "deletions": 24
       },
-      "createdAt": "2026-11-21T09:12:00Z"
+      "createdAt": "2026-11-21T09:12:00Z",
+      "archivedAt": null
     },
     {
       "kind": "mission",
@@ -325,7 +326,8 @@
       "ownerId": "p-mark",
       "nodeId": "n-mark-desktop",
       "stats": null,
-      "createdAt": "2026-11-21T09:40:00Z"
+      "createdAt": "2026-11-21T09:40:00Z",
+      "archivedAt": null
     },
     {
       "kind": "mission",
@@ -343,7 +345,8 @@
       "ownerId": "p-mark",
       "nodeId": "n-mark-desktop",
       "stats": null,
-      "createdAt": "2026-11-20T15:00:00Z"
+      "createdAt": "2026-11-20T15:00:00Z",
+      "archivedAt": null
     },
     {
       "kind": "membership",

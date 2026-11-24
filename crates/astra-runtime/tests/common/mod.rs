@@ -160,6 +160,7 @@ pub fn mission(id: &str, mode: MissionMode, branch: &str) -> Entity {
         node_id: Some(NODE.into()),
         stats: None,
         created_at: "2026-11-21T09:00:00Z".into(),
+        archived_at: None,
     })
 }
 

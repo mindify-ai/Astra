@@ -315,3 +315,115 @@ async fn one_agent_plays_two_roles_at_the_same_time() {
         assert_eq!(s.results[id].diff[0].path, "together.txt", "{id}");
     }
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn archiving_stops_a_running_mission_quietly_and_unarchiving_brings_it_back() {
+    let tmp = tempfile::tempdir().expect("tmp");
+    let state = setup(
+        tmp.path(),
+        vec![
+            mission_agent("ma-b", "m-1", "a-slow", Role::Builder),
+            mission_agent("ma-t", "m-1", "a-fast", Role::Tester),
+            membership("m-1", "p-steer", Access::Steer),
+        ],
+    );
+    let host = TestHost::new(state);
+    let orch = orchestrator(host.clone(), &tmp.path().join("data"));
+    start_and_wait_working(&host, &orch, "ma-b").await;
+
+    // Only the owner may archive.
+    let denied = host.command(
+        &orch,
+        "p-steer",
+        Command::ArchiveMission {
+            mission_id: "m-1".into(),
+            archived: true,
+        },
+    );
+    let (ok, err) = wait_for(&host, "denied", |_, ops| result_in(ops, &denied)).await;
+    assert!(!ok && err.expect("err").contains("only the owner"));
+
+    let archive = host.command(
+        &orch,
+        "p-owner",
+        Command::ArchiveMission {
+            mission_id: "m-1".into(),
+            archived: true,
+        },
+    );
+    wait_for(&host, "archived", |_, ops| result_in(ops, &archive)).await;
+    assert_eq!(host.result_of(&archive), Some((true, None)));
+    assert!(!orch.is_running("ma-b"));
+    // Give a wrongly continuing pipeline time to start the tester.
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    let s = host.state();
+    assert!(s.missions["m-1"].archived_at.is_some());
+    assert_eq!(s.missions["m-1"].status, MissionStatus::NeedsYou);
+    assert_eq!(
+        s.mission_agents["ma-b"].status_detail.as_deref(),
+        Some("stopped: archived")
+    );
+    assert_eq!(s.mission_agents["ma-t"].status, MissionAgentStatus::Queued);
+    assert!(
+        !s.messages
+            .values()
+            .any(|m| m.body.starts_with("The mission stopped"))
+    );
+
+    let send = host.command(
+        &orch,
+        "p-owner",
+        Command::SendMessage {
+            mission_id: "m-1".into(),
+            to: Some("ma-b".into()),
+            body: "go on".into(),
+        },
+    );
+    let (ok, _) = wait_for(&host, "rejected", |_, ops| result_in(ops, &send)).await;
+    assert!(!ok);
+
+    let back = host.command(
+        &orch,
+        "p-owner",
+        Command::ArchiveMission {
+            mission_id: "m-1".into(),
+            archived: false,
+        },
+    );
+    wait_for(&host, "unarchived", |_, ops| result_in(ops, &back)).await;
+    assert!(host.state().missions["m-1"].archived_at.is_none());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn deleting_a_mission_removes_it_its_records_and_its_worktree() {
+    let tmp = tempfile::tempdir().expect("tmp");
+    let state = setup(
+        tmp.path(),
+        vec![mission_agent("ma-b", "m-1", "a-slow", Role::Builder)],
+    );
+    let host = TestHost::new(state);
+    let data = tmp.path().join("data");
+    let orch = orchestrator(host.clone(), &data);
+    start_and_wait_working(&host, &orch, "ma-b").await;
+    let worktrees = data.join("worktrees").join("m-1");
+    assert!(worktrees.exists());
+
+    let delete = host.command(
+        &orch,
+        "p-owner",
+        Command::DeleteMission {
+            mission_id: "m-1".into(),
+        },
+    );
+    wait_for(&host, "deleted", |_, ops| result_in(ops, &delete)).await;
+    assert_eq!(host.result_of(&delete), Some((true, None)));
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    let s = host.state();
+    assert!(!s.missions.contains_key("m-1"));
+    assert!(!s.mission_agents.contains_key("ma-b"));
+    assert!(!s.tasks.values().any(|t| t.mission_id == "m-1"));
+    assert!(!s.messages.values().any(|m| m.mission_id == "m-1"));
+    assert!(!s.memberships.values().any(|m| m.mission_id == "m-1"));
+    assert!(!worktrees.exists());
+    assert!(!orch.is_running("ma-b"));
+}

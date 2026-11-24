@@ -89,3 +89,30 @@ describe("a mission's agents", () => {
     expect(client.getState().agentTypes[created?.id ?? '']).toBeUndefined()
   })
 })
+
+describe('archiving and deleting missions', () => {
+  it('archives a mission from its thread, lists it on the board, and brings it back', async () => {
+    const { client, user } = mount('/missions/m-014')
+    await screen.findByRole('list', { name: 'Thread' })
+    await user.click(screen.getByRole('button', { name: 'Archive' }))
+    expect(await screen.findByText('Archived')).toBeTruthy()
+    expect(client.getState().missions['m-014']?.archivedAt).not.toBeNull()
+    expect(screen.getByRole('button', { name: 'Unarchive' })).toBeTruthy()
+
+    await user.click(screen.getByRole('link', { name: 'BOARD' }))
+    const archived = await screen.findByRole('region', { name: 'Archived missions' })
+    expect(within(archived).getByText('Add rate limiting to the gateway')).toBeTruthy()
+    await user.click(within(archived).getByRole('button', { name: 'Unarchive' }))
+    expect(client.getState().missions['m-014']?.archivedAt).toBeNull()
+    expect(screen.queryByRole('region', { name: 'Archived missions' })).toBeNull()
+  })
+
+  it('deletes a mission after asking, and goes home', async () => {
+    const { client, user } = mount('/missions/m-015')
+    await screen.findByRole('list', { name: 'Thread' })
+    await user.click(screen.getByRole('button', { name: 'Delete' }))
+    await user.click(screen.getByRole('button', { name: 'Delete mission 015' }))
+    expect(client.getState().missions['m-015']).toBeUndefined()
+    expect(await screen.findByRole('heading', { name: 'Start a mission.' })).toBeTruthy()
+  })
+})

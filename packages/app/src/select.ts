@@ -96,8 +96,15 @@ const byNumberDesc = (a: Mission, b: Mission) => b.number - a.number
 export function orderedMissions(s: State, repoId?: Id): Mission[] {
   const rank: Record<MissionStatus, number> = { working: 0, needsYou: 1, draft: 2, done: 3, merged: 3 }
   return Object.values(s.missions)
-    .filter((m) => !repoId || m.repoId === repoId)
+    .filter((m) => !m.archivedAt && (!repoId || m.repoId === repoId))
     .sort((a, b) => rank[a.status] - rank[b.status] || byNumberDesc(a, b))
+}
+
+/** Archived missions, newest first. */
+export function archivedMissions(s: State, repoId?: Id): Mission[] {
+  return Object.values(s.missions)
+    .filter((m) => m.archivedAt && (!repoId || m.repoId === repoId))
+    .sort(byNumberDesc)
 }
 
 /** The agents taking part in a mission (removed ones stay in `s.missionAgents` for the thread's history). */

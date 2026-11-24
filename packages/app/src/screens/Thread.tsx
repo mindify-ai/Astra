@@ -28,6 +28,7 @@ import {
   orderedMissions,
   roleName,
 } from '../select'
+import { ArchivedBanner, MissionActions } from '../shared/missionActions'
 import { latestPerAgent, MessageItem, messagesOf } from '../shared/thread'
 import { AppHeader, NewMissionButton, Page, ShareButton } from '../shell/AppHeader'
 import { MissionNotFound, useMissionPresence } from './common'
@@ -86,6 +87,7 @@ export function Thread({ missionId }: { missionId: string }) {
           people={people.map((p) => p.person)}
           actions={
             <>
+              <MissionActions missionId={missionId} />
               <ShareButton missionId={missionId} />
               <NewMissionButton />
             </>
@@ -164,6 +166,7 @@ export function Thread({ missionId }: { missionId: string }) {
         </aside>
 
         <main className="flex min-w-0 flex-[999_1_560px] flex-col">
+          <ArchivedBanner missionId={missionId} />
           <div className="flex flex-wrap items-end justify-between gap-x-8 gap-y-4 border-b border-line px-8 py-6">
             <div className="flex flex-col gap-2">
               <Eyebrow>Mission {missionNo(mission)}</Eyebrow>
