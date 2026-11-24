@@ -511,7 +511,10 @@ async fn interrupted_agent_is_marked_and_a_message_restarts_it() {
     orch.recover_interrupted();
     let s = host.state();
     assert_eq!(s.mission_agents["ma-1"].status, MissionAgentStatus::Idle);
-    assert_eq!(s.mission_agents["ma-1"].status_detail.as_deref(), Some("interrupted"));
+    assert_eq!(
+        s.mission_agents["ma-1"].status_detail.as_deref(),
+        Some("interrupted")
+    );
 
     let send = host.command(
         &orch,
@@ -523,8 +526,9 @@ async fn interrupted_agent_is_marked_and_a_message_restarts_it() {
         },
     );
     wait_for(&host, "the restarted agent answers", |s, _| {
-        s.messages.values().any(|m| m.body.contains("keep going"))
-            && s.mission_agents["ma-1"].status == MissionAgentStatus::Done
+        (s.messages.values().any(|m| m.body.contains("keep going"))
+            && s.mission_agents["ma-1"].status == MissionAgentStatus::Done)
+            .then_some(())
     })
     .await;
     assert_eq!(host.result_of(&send), Some((true, None)));

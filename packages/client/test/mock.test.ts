@@ -38,11 +38,12 @@ describe('mock node', () => {
   it('rejects steering a builder held by someone else', async () => {
     const c = client()
     const before = Object.keys(c.getState().messages).length
-    const ops = await sendMessage(c, 'm-014', 'ma-014-builder', 'Use the Redis store')
+    const outcome = await sendMessage(c, 'm-014', 'ma-014-builder', 'Use the Redis store')
     // The human message is written; the node refuses to hand over steering held by Lin.
     expect(Object.keys(c.getState().messages).length).toBe(before + 1)
     expect(c.getState().missionAgents['ma-014-builder']?.steeredBy).toBe('p-lin')
-    expect(ops[0]?.body.type).toBe('put')
+    expect(outcome?.ok).toBe(false)
+    expect(outcome?.error).toMatch(/steering/i)
   })
 
   it('lets steerers approve only when the agent or mission allows it', async () => {

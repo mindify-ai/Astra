@@ -518,8 +518,29 @@ impl Orchestrator {
                             .collect()
                     })
                     .unwrap_or_default();
-                for id in ids {
-                    self.deliver(&id, body);
+                if !ids.is_empty() {
+                    for id in ids {
+                        self.deliver(&id, body);
+                    }
+                    return Ok(());
+                }
+                // Nobody is running: resume the agents that were interrupted or failed.
+                let stopped: Vec<MissionAgent> = read(self.host(), |s| {
+                    s.mission_agents
+                        .values()
+                        .filter(|m| m.mission_id == mission_id && m.enabled)
+                        .filter(|m| m.status == MissionAgentStatus::Idle)
+                        .cloned()
+                        .collect()
+                });
+                if stopped.is_empty() {
+                    return Err(
+                        "no agent in this mission is running; pick one under To to restart it"
+                            .into(),
+                    );
+                }
+                for ma in stopped {
+                    self.restart(ma, body)?;
                 }
             }
         }

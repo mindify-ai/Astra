@@ -10,6 +10,12 @@ export const DEFAULT_NODE = 'n-local'
 
 const command = (node: Id, cmd: Command): OpBody => ({ type: 'command', node, command: cmd })
 
+/** The outcome of the command op among `ops` (null if the node did not answer in time). */
+async function outcomeOf(client: AstraClient, ops: Op[]): Promise<CommandOutcome | null> {
+  const cmd = ops.find((o) => o.body.type === 'command')
+  return cmd ? client.commandResult(cmd.id) : null
+}
+
 export function slugify(text: string, max = 32): string {
   const slug = text
     .toLowerCase()
@@ -124,11 +130,17 @@ export function approve(client: AstraClient, approvalId: Id, allow: boolean) {
 }
 
 /** Writes the human message, then asks the node to deliver it (steering the target agent if `to` is set). */
-export function sendMessage(client: AstraClient, missionId: Id, to: Id | null, body: string) {
+/** Posts a message to the thread and delivers it; resolves with the node's answer (it may restart an agent). */
+export async function sendMessage(
+  client: AstraClient,
+  missionId: Id,
+  to: Id | null,
+  body: string,
+): Promise<CommandOutcome | null> {
   const state = client.getState()
   const text = body.trim()
-  if (!text) return Promise.resolve([])
-  return client.submit([
+  if (!text) return null
+  const ops = await client.submit([
     {
       type: 'put',
       entity: {
@@ -147,6 +159,7 @@ export function sendMessage(client: AstraClient, missionId: Id, to: Id | null, b
     },
     command(nodeForMission(state, missionId), { type: 'sendMessage', missionId, to, body: text }),
   ])
+  return outcomeOf(client, ops)
 }
 
 export function merge(client: AstraClient, resultId: Id) {
@@ -165,12 +178,6 @@ export function agentCommand(
   const ma = state.missionAgents[missionAgentId]
   if (!ma) return Promise.resolve([])
   return client.submit([command(nodeForMission(state, ma.missionId), { type, missionAgentId })])
-}
-
-/** The outcome of the command op among `ops` (null if the node did not answer in time). */
-async function outcomeOf(client: AstraClient, ops: Op[]): Promise<CommandOutcome | null> {
-  const cmd = ops.find((o) => o.body.type === 'command')
-  return cmd ? client.commandResult(cmd.id) : null
 }
 
 /** Saves an agent's setup and asks its node to connect it; resolves with the node's answer. */

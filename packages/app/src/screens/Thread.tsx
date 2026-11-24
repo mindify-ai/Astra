@@ -38,6 +38,7 @@ export function Thread({ missionId }: { missionId: string }) {
   const mission = s.missions[missionId]
   const [to, setTo] = useState<string>('all')
   const [draft, setDraft] = useState('')
+  const [sendError, setSendError] = useState<string | null>(null)
   const listEnd = useRef<HTMLDivElement>(null)
   const messages = messagesOf(s, missionId)
   useMissionPresence(missionId, 'Watching the thread')
@@ -60,8 +61,11 @@ export function Thread({ missionId }: { missionId: string }) {
 
   const send = async () => {
     if (!draft.trim()) return
-    await sendMessage(client, missionId, to === 'all' ? null : to, draft)
+    const text = draft
     setDraft('')
+    setSendError(null)
+    const outcome = await sendMessage(client, missionId, to === 'all' ? null : to, text)
+    if (outcome && !outcome.ok) setSendError(outcome.error ?? 'The message was not delivered.')
   }
 
   return (
@@ -115,11 +119,25 @@ export function Thread({ missionId }: { missionId: string }) {
             <ul className="m-0 list-none p-0">
               {agents.map((ma) => {
                 const st = agentStatus[ma.status]
+                // Live activity while it works; otherwise why it stopped ("interrupted", "error: …").
+                const now = ma.status === 'working' ? ma.latest[ma.latest.length - 1] : undefined
+                const detail = now ? `${now.verb} ${now.target}` : ma.statusDetail
                 return (
                   <li key={ma.id} className="flex items-center gap-3 px-3 py-2">
-                    <span className="flex grow flex-col">
+                    <span className="flex min-w-0 grow flex-col">
                       <span>{roleName[ma.role]}</span>
                       <Spec>{agentOf(s, ma)?.name}</Spec>
+                      {detail ? (
+                        <Data
+                          title={detail}
+                          className={cx(
+                            'truncate',
+                            detail.startsWith('error') ? 'text-danger' : 'text-ink-muted',
+                          )}
+                        >
+                          {detail}
+                        </Data>
+                      ) : null}
                     </span>
                     <Status tone={st.tone}>{st.label}</Status>
                   </li>
@@ -188,6 +206,11 @@ export function Thread({ missionId }: { missionId: string }) {
             <Button type="submit" disabled={!mayWrite}>
               Send
             </Button>
+            {sendError ? (
+              <div role="alert" className="basis-full text-[13px]">
+                <Status tone="danger">{sendError}</Status>
+              </div>
+            ) : null}
           </form>
         </main>
       </div>
