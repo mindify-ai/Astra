@@ -11,6 +11,7 @@ import {
   Eyebrow,
   formatDiffStats,
   inlineLinkClass,
+  Markdown,
   Spec,
   Status,
 } from '@astra/ui'
@@ -159,7 +160,7 @@ export function Review({ missionId }: { missionId: string }) {
                   {verdict.agent?.name} · {hhmm(verdict.message.at)}
                 </Spec>
               </div>
-              <p className="m-0 max-w-[760px]">{verdict.message.body}</p>
+              <Markdown className="max-w-[760px]">{verdict.message.body}</Markdown>
             </div>
           </section>
         ) : null}

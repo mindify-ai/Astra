@@ -1,5 +1,6 @@
 import { HlcClock } from './hlc'
 import { Store } from './store'
+import type { TerminalHost } from './terminal'
 import type { Connectivity, Op, Presence, Snapshot } from './types'
 
 interface NodeInfo {
@@ -61,3 +62,33 @@ export class TauriClient extends Store {
 
 /** True when running inside a Tauri webview. */
 export const isTauri = (): boolean => typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
+
+/** The desktop app's terminal: a login shell in a pseudo-terminal, run by the Rust shell. */
+export const tauriTerminal: TerminalHost = {
+  async open({ cwd, cols, rows, onData, onExit }) {
+    const [{ invoke }, { listen }] = await Promise.all([
+      import('@tauri-apps/api/core'),
+      import('@tauri-apps/api/event'),
+    ])
+    const id = crypto.randomUUID()
+    // Listen first: the shell may print before `terminal_open` returns.
+    const unlisten = await Promise.all([
+      listen<string>(`astra://terminal/${id}/data`, (e) => onData(e.payload)),
+      listen<number | null>(`astra://terminal/${id}/exit`, (e) => {
+        for (const u of unlisten) u()
+        onExit(e.payload)
+      }),
+    ])
+    try {
+      await invoke('terminal_open', { id, cwd, cols, rows })
+    } catch (err) {
+      for (const u of unlisten) u()
+      throw err
+    }
+    return {
+      write: (data) => void invoke('terminal_write', { id, data }).catch(() => {}),
+      resize: (c, r) => void invoke('terminal_resize', { id, cols: c, rows: r }).catch(() => {}),
+      close: () => void invoke('terminal_close', { id }).catch(() => {}),
+    }
+  },
+}

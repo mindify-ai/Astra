@@ -11,6 +11,8 @@ use astra_protocol::{Op, Presence, Snapshot};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
 
+mod terminal;
+
 /// A first launch starts with only you and the catalog of agents you can connect: no demo data.
 const STARTER: &str = include_str!("../../../../fixtures/starter.json");
 
@@ -342,6 +344,7 @@ pub fn run() {
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        .manage(terminal::Terminals::default())
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
             let (node, info) = tauri::async_runtime::block_on(start_node(data_dir))?;
@@ -355,7 +358,11 @@ pub fn run() {
             snapshot,
             apply,
             set_presence,
-            connectivity
+            connectivity,
+            terminal::terminal_open,
+            terminal::terminal_write,
+            terminal::terminal_resize,
+            terminal::terminal_close
         ])
         .run(tauri::generate_context!())
         .expect("error while running Astra");

@@ -12,6 +12,31 @@ function mount(path: string, platform: Platform = 'mac') {
 }
 
 describe('desktop', () => {
+  it('shows a terminal dock only when the host can run shells', async () => {
+    const opened: (string | null)[] = []
+    const terminal = {
+      open: async (o: { cwd: string | null }) => {
+        opened.push(o.cwd)
+        return { write() {}, resize() {}, close() {} }
+      },
+    }
+    const client = new MockClient({ seed: demoSeed, latency: 0 })
+    const { unmount } = render(
+      <AstraApp client={client} platform="mac" history={{ memory: '/' }} host={{ terminal }} />,
+    )
+    const user = userEvent.setup()
+    await user.click(await screen.findByRole('button', { name: 'TERMINAL' }))
+    expect(await screen.findByRole('region', { name: 'Terminal' })).toBeTruthy()
+    expect(screen.getByRole('tab', { selected: true })).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'HIDE' }))
+    expect(screen.queryByRole('region', { name: 'Terminal' })).toBeNull()
+    unmount()
+
+    mount('/')
+    await screen.findByRole('heading', { name: 'Start a mission.' })
+    expect(screen.queryByRole('button', { name: 'TERMINAL' })).toBeNull()
+  })
+
   it('a clean workspace starts at welcome with every agent ready to connect', async () => {
     const client = new MockClient({ seed: starterSeed, latency: 0 })
     render(<AstraApp client={client} platform="mac" history={{ memory: '/' }} />)

@@ -50,3 +50,43 @@
     user-select: none;
   }
 }
+
+/* Code highlighting in <Markdown>: token colours only, readable in both themes. */
+.astra-md .hljs-comment,
+.astra-md .hljs-quote {
+  color: var(--ink-muted);
+  font-style: italic;
+}
+.astra-md .hljs-keyword,
+.astra-md .hljs-selector-tag,
+.astra-md .hljs-built_in,
+.astra-md .hljs-type {
+  color: var(--chart-3);
+}
+.astra-md .hljs-string,
+.astra-md .hljs-regexp,
+.astra-md .hljs-addition,
+.astra-md .hljs-template-tag {
+  color: var(--signal);
+}
+.astra-md .hljs-number,
+.astra-md .hljs-literal,
+.astra-md .hljs-symbol,
+.astra-md .hljs-variable.constant_ {
+  color: var(--warning);
+}
+.astra-md .hljs-title,
+.astra-md .hljs-section,
+.astra-md .hljs-name {
+  color: var(--ink);
+  font-weight: 600;
+}
+.astra-md .hljs-attr,
+.astra-md .hljs-attribute,
+.astra-md .hljs-property,
+.astra-md .hljs-meta {
+  color: var(--ink-muted);
+}
+.astra-md .hljs-deletion {
+  color: var(--danger);
+}

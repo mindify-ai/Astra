@@ -32,6 +32,8 @@ astra-node = { path = "../../../crates/astra-node", default-features = false }
 
 [target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dependencies]
 astra-node = { path = "../../../crates/astra-node", features = ["runtime"] }
+# The in-app terminal (desktop only).
+portable-pty = "0.9.0"
 
 [profile.release]
 lto = "thin"

@@ -4,6 +4,7 @@ import { Link } from '@tanstack/react-router'
 import { type ReactNode, useEffect, useRef, useState } from 'react'
 import { useAstraState, useConnectivity, useHost, usePlatform, useUi } from '../context'
 import { currentMissionId } from '../select'
+import { TerminalButton } from './Terminal'
 
 export type View = 'thread' | 'map' | 'board'
 
@@ -26,6 +27,7 @@ const navLink =
 
 function AppMenu() {
   const host = useHost()
+  const ui = useUi()
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -69,6 +71,19 @@ function AppMenu() {
           <Link role="menuitem" to="/setup/repo" className={item} onClick={() => setOpen(false)}>
             Repositories
           </Link>
+          {host.terminal ? (
+            <button
+              type="button"
+              role="menuitem"
+              className={`${item} w-full border-0 bg-transparent text-left`}
+              onClick={() => {
+                setOpen(false)
+                ui.setTerminalOpen(true)
+              }}
+            >
+              Terminal
+            </button>
+          ) : null}
           {host.signOut ? (
             <button
               type="button"
@@ -186,6 +201,7 @@ export function AppHeader({ repoSelect, nav, step, byline, people, actions, bord
       ) : null}
       {byline ? <Spec>{byline}</Spec> : null}
       {people && people.length > 0 ? <AvatarStack people={people} /> : null}
+      <TerminalButton />
       {actions}
       {windowControls && windowControls !== 'mac' ? (
         <WindowControls platform={windowControls} {...windowActions} />

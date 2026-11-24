@@ -1,4 +1,4 @@
-import type { AstraClient, Connectivity, State } from '@astra/client'
+import type { AstraClient, Connectivity, State, TerminalHost } from '@astra/client'
 import type { DesktopPlatform, MobilePlatform, WindowActions } from '@astra/ui'
 import {
   createContext,
@@ -87,6 +87,8 @@ export interface HostCapabilities {
   copy?: (text: string) => Promise<void>
   /** Ends the session (web, signed in to a relay). */
   signOut?: () => void
+  /** Runs shells on this machine for the terminal dock (desktop app). */
+  terminal?: TerminalHost
 }
 
 const HostContext = createContext<HostCapabilities>({})
@@ -101,6 +103,8 @@ interface UiState {
   setLastMissionId: (id: string) => void
   shareMissionId: string | null
   openShare: (missionId: string | null) => void
+  terminalOpen: boolean
+  setTerminalOpen: (open: boolean) => void
 }
 
 const UiContext = createContext<UiState | null>(null)
@@ -158,6 +162,7 @@ export function AstraProvider({
   const repoId = repositories[savedRepoId] ? savedRepoId : (Object.keys(repositories)[0] ?? '')
   const [lastMissionId, setLast] = useState(() => read('astra.lastMission'))
   const [shareMissionId, openShare] = useState<string | null>(null)
+  const [terminalOpen, setTerminalOpen] = useState(false)
   const ui = useMemo<UiState>(
     () => ({
       repoId,
@@ -172,8 +177,10 @@ export function AstraProvider({
       },
       shareMissionId,
       openShare,
+      terminalOpen,
+      setTerminalOpen,
     }),
-    [repoId, lastMissionId, shareMissionId],
+    [repoId, lastMissionId, shareMissionId, terminalOpen],
   )
 
   return (

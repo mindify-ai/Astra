@@ -1,5 +1,5 @@
 import { AstraApp, type Platform } from '@astra/app'
-import { isTauri, MockClient, starterSeed, TauriClient } from '@astra/client'
+import { isTauri, MockClient, starterSeed, TauriClient, tauriTerminal } from '@astra/client'
 import { writeText } from '@tauri-apps/plugin-clipboard-manager'
 import { open } from '@tauri-apps/plugin-dialog'
 import { platform as osPlatform } from '@tauri-apps/plugin-os'
@@ -40,13 +40,15 @@ if (!isTauri()) {
 
 function startNode() {
   const client = new TauriClient()
+  const platform = detectPlatform()
+  const desktop = platform !== 'ios' && platform !== 'android'
   client.ready
     .then(() => {
       root.render(
         <StrictMode>
           <AstraApp
             client={client}
-            platform={detectPlatform()}
+            platform={platform}
             history="hash"
             windowActions={{
               onClose: () => void TauriClient.windowAction('close'),
@@ -59,6 +61,7 @@ function startNode() {
                 return typeof picked === 'string' ? picked : null
               },
               copy: (text) => writeText(text),
+              terminal: desktop ? tauriTerminal : undefined,
             }}
           />
         </StrictMode>,

@@ -10,6 +10,7 @@ import {
   DiffView,
   Eyebrow,
   formatDiffStats,
+  Markdown,
   SectionHeading,
   Segmented,
   Spec,
@@ -294,7 +295,7 @@ export function MobileReview({ missionId }: { missionId: string }) {
               {verdict.agent?.name} · {hhmm(verdict.message.at)}
             </Spec>
           </div>
-          <p className="m-0">{verdict.message.body}</p>
+          <Markdown>{verdict.message.body}</Markdown>
         </section>
       ) : null}
       {current ? (

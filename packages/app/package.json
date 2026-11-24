@@ -14,7 +14,9 @@
     "@astra/client": "workspace:*",
     "@astra/tokens": "workspace:*",
     "@astra/ui": "workspace:*",
-    "@tanstack/react-router": "1.170.46"
+    "@tanstack/react-router": "1.170.46",
+    "@xterm/addon-fit": "0.11.0",
+    "@xterm/xterm": "6.0.0"
   },
   "peerDependencies": {
     "react": "^19.0.0",

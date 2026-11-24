@@ -1,5 +1,5 @@
 import type { Task, TaskColumn } from '@astra/client'
-import { Avatar, Card, cx, SectionHeading, Spec } from '@astra/ui'
+import { Avatar, Card, cx, Markdown, SectionHeading, Spec } from '@astra/ui'
 import { Link } from '@tanstack/react-router'
 import { useAstraState, useUi } from '../context'
 import { agentOf, columnStatus, connectedAgents, missionNo, personName, roleName } from '../select'
@@ -35,7 +35,7 @@ function TaskCard({ task }: { task: Task }) {
           {task.mergedBy ? ` · merged by ${personName(s, task.mergedBy)}` : ''}
         </span>
       ) : task.note ? (
-        <span className="text-ink-muted">{task.note}</span>
+        <Markdown className="text-ink-muted">{task.note}</Markdown>
       ) : null}
       {steering ? (
         <div className="flex items-center gap-2 border-t border-line pt-2 text-[13px] text-ink-muted">

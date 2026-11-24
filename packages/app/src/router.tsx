@@ -20,11 +20,14 @@ import { Repo } from './screens/Repo'
 import { Review } from './screens/Review'
 import { Thread } from './screens/Thread'
 import { Welcome } from './screens/Welcome'
+import { WithTerminal } from './shell/Terminal'
 
 const rootRoute = createRootRoute({
   component: () => (
     <>
-      <Outlet />
+      <WithTerminal>
+        <Outlet />
+      </WithTerminal>
       <PeopleDialog />
     </>
   ),

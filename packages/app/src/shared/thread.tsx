@@ -1,5 +1,16 @@
 import { type Approval, approve, type Message, type State } from '@astra/client'
-import { AgentGlyph, ArrowRightIcon, Avatar, Button, CheckIcon, cx, LogWell, Spec, Status } from '@astra/ui'
+import {
+  AgentGlyph,
+  ArrowRightIcon,
+  Avatar,
+  Button,
+  CheckIcon,
+  cx,
+  LogWell,
+  Markdown,
+  Spec,
+  Status,
+} from '@astra/ui'
 import { useAstraState, useClient } from '../context'
 import { agentOf, agentStatus, canApprove, hhmm, personName, roleLetter, roleName } from '../select'
 
@@ -134,7 +145,7 @@ export function MessageItem({
           <Spec>{meta}</Spec>
           {status}
         </div>
-        <p className="m-0 whitespace-pre-wrap">{message.body}</p>
+        {message.body ? <Markdown>{message.body}</Markdown> : null}
         {message.plan.length > 0 ? (
           <ul className="m-0 mt-1 list-none p-0 text-ink-muted">
             {message.plan.map((step) => (
