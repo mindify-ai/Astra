@@ -120,6 +120,13 @@ export function CommandPalette() {
         run: go('/setup/agents'),
       },
       { id: 'repos', group: 'Go to', label: 'Repositories', keywords: 'folder repo', run: go('/setup/repo') },
+      {
+        id: 'code',
+        group: 'Go to',
+        label: 'Open code editor',
+        keywords: 'files source edit explorer',
+        run: go('/code'),
+      },
     )
     if (cm) {
       const p = { missionId: cm.id }

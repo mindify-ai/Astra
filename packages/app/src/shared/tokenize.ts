@@ -89,7 +89,10 @@ const rules: Record<Exclude<Language, 'plain'>, { rules: Rule[]; keywords?: Set<
       dq,
       sq,
       ['string', /`(?:[^`\\]|\\[\s\S])*`?/y],
-      ['number', /(?:0[xX][\da-fA-F_]+|0[bB][01_]+|0[oO][0-7_]+|(?:\d[\d_]*\.?[\d_]*|\.\d[\d_]*)(?:[eE][+-]?\d+)?)n?/y],
+      [
+        'number',
+        /(?:0[xX][\da-fA-F_]+|0[bB][01_]+|0[oO][0-7_]+|(?:\d[\d_]*\.?[\d_]*|\.\d[\d_]*)(?:[eE][+-]?\d+)?)n?/y,
+      ],
       ['word', /[A-Za-z_$][\w$]*/y],
     ],
   },

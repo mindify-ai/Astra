@@ -42,8 +42,7 @@ const byKindThenName = (a: FileEntry, b: FileEntry) =>
 export function memoryFiles(initial: Record<string, string>): FilesHost {
   const files = new Map<string, string>()
   for (const [path, text] of Object.entries(initial)) files.set(relativeSegments(path).join('/'), text)
-  const hasDir = (dir: string) =>
-    dir === '' || [...files.keys()].some((p) => p.startsWith(`${dir}/`))
+  const hasDir = (dir: string) => dir === '' || [...files.keys()].some((p) => p.startsWith(`${dir}/`))
 
   return {
     async list(_root, dir) {

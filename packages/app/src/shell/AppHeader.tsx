@@ -72,6 +72,9 @@ function AppMenu() {
           <Link role="menuitem" to="/setup/repo" className={item} onClick={() => setOpen(false)}>
             Repositories
           </Link>
+          <Link role="menuitem" to="/code" className={item} onClick={() => setOpen(false)}>
+            Code editor
+          </Link>
           {host.terminal ? (
             <button
               type="button"
@@ -203,6 +206,11 @@ export function AppHeader({ repoSelect, nav, step, byline, people, actions, bord
       {byline ? <Spec>{byline}</Spec> : null}
       {people && people.length > 0 ? <AvatarStack people={people} /> : null}
       <PaletteButton />
+      {repos.length > 0 ? (
+        <Link to="/code" title="Code editor" className={buttonClass('text', 'sm')}>
+          CODE
+        </Link>
+      ) : null}
       <TerminalButton />
       {actions}
       {windowControls && windowControls !== 'mac' ? (

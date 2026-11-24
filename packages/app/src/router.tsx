@@ -12,6 +12,7 @@ import { MobileAgents, MobileHome, MobilePeople, MobileReview, MobileThread } fr
 import { Board } from './screens/Board'
 import { CodeReview } from './screens/CodeReview'
 import { Connect } from './screens/Connect'
+import { Editor } from './screens/Editor'
 import { Home } from './screens/Home'
 import { Launch } from './screens/Launch'
 import { MapView } from './screens/Map'
@@ -123,6 +124,7 @@ const mergedRoute = createRoute({
   },
 })
 const boardRoute = createRoute({ getParentRoute: () => rootRoute, path: '/board', component: Board })
+const codeRoute = createRoute({ getParentRoute: () => rootRoute, path: '/code', component: Editor })
 const agentsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/agents',
@@ -146,6 +148,7 @@ const routeTree = rootRoute.addChildren([
   codeReviewRoute,
   mergedRoute,
   boardRoute,
+  codeRoute,
   agentsRoute,
   peopleRoute,
 ])
