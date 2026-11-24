@@ -24,12 +24,27 @@ const Glyph = ({ d, rect }: { d?: string; rect?: boolean }) => (
     {rect ? <rect x="1.5" y="1.5" width="7" height="7" /> : <path d={d} />}
   </svg>
 )
+const MacGlyph = ({ d, className }: { d: string; className?: string }) => (
+  <svg
+    aria-hidden="true"
+    width="8"
+    height="8"
+    viewBox="0 0 8 8"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.2"
+    strokeLinecap="round"
+    className={className}
+  >
+    <path d={d} />
+  </svg>
+)
 const MIN = 'M1 5h8'
 const CLOSE = 'M1.5 1.5l7 7M8.5 1.5l-7 7'
 
 /**
  * Window controls drawn per platform (Platforms artboard):
- * macOS — three outlined circles on the left; Windows — 46px flush buttons on the right;
+ * macOS — red, amber and green lights on the left; Windows — 46px flush buttons on the right;
  * Linux — three 24px filled circles on the right.
  */
 export function WindowControls({
@@ -40,12 +55,36 @@ export function WindowControls({
   height = 56,
 }: WindowActions & { platform: DesktopPlatform; height?: number }) {
   if (platform === 'mac') {
-    const dot = 'box-border size-3 rounded-full border border-line-strong bg-transparent p-0 hover:bg-line'
+    // Filled red / amber / green lights; their glyphs show while the pointer is over the group, as on macOS.
+    const dot =
+      'box-border flex size-3 items-center justify-center rounded-full border-0 p-0 text-on-window-control'
+    const glyph = 'opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100'
     return (
-      <div className="flex items-center gap-2">
-        <button type="button" aria-label="Close window" className={dot} onClick={onClose} />
-        <button type="button" aria-label="Minimize window" className={dot} onClick={onMinimize} />
-        <button type="button" aria-label="Zoom window" className={dot} onClick={onMaximize} />
+      <div className="group flex items-center gap-2">
+        <button
+          type="button"
+          aria-label="Close window"
+          className={cx(dot, 'bg-window-close')}
+          onClick={onClose}
+        >
+          <MacGlyph d="M2.5 2.5l3 3M5.5 2.5l-3 3" className={glyph} />
+        </button>
+        <button
+          type="button"
+          aria-label="Minimize window"
+          className={cx(dot, 'bg-window-minimize')}
+          onClick={onMinimize}
+        >
+          <MacGlyph d="M2 4h4" className={glyph} />
+        </button>
+        <button
+          type="button"
+          aria-label="Zoom window"
+          className={cx(dot, 'bg-window-zoom')}
+          onClick={onMaximize}
+        >
+          <MacGlyph d="M4 2v4M2 4h4" className={glyph} />
+        </button>
       </div>
     )
   }

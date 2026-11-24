@@ -1,4 +1,4 @@
-import type { AstraClient, Connectivity, State, TerminalHost } from '@astra/client'
+import type { AstraClient, Connectivity, FilesHost, State, TerminalHost } from '@astra/client'
 import type { DesktopPlatform, MobilePlatform, WindowActions } from '@astra/ui'
 import {
   createContext,
@@ -89,6 +89,8 @@ export interface HostCapabilities {
   signOut?: () => void
   /** Runs shells on this machine for the terminal dock (desktop app). */
   terminal?: TerminalHost
+  /** Reads and writes the repository's files for the code editor (desktop app). */
+  files?: FilesHost
 }
 
 const HostContext = createContext<HostCapabilities>({})

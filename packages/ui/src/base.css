@@ -90,3 +90,37 @@
 .astra-md .hljs-deletion {
   color: var(--danger);
 }
+
+/* Map motion: work flowing along an edge, a pulse for "needs you", boxes arriving. */
+@keyframes astra-flow {
+  to {
+    stroke-dashoffset: -24;
+  }
+}
+@keyframes astra-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+@keyframes astra-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+}
+.astra-flow {
+  animation: astra-flow 0.9s linear infinite;
+}
+.astra-pulse {
+  animation: astra-pulse 1.6s ease-in-out infinite;
+}
+.astra-pop {
+  animation: astra-pop 360ms cubic-bezier(0.2, 0.8, 0.2, 1) backwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  .astra-flow,
+  .astra-pulse,
+  .astra-pop {
+    animation: none;
+  }
+}

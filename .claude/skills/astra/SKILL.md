@@ -87,7 +87,7 @@ Terraform (in `infra/gcp`): `terraform fmt -check -recursive && terraform init -
    - Phone screens use `MobileFrame`, `BrandBar`/`MissionTopBar` and `MobileTabs`.
    - iOS and Android differ on purpose: back affordance, title alignment, approve/deny order, segmented
      control vs. tabs, tab-bar style. Follow the existing components.
-7. **Platform chrome.** macOS draws outlined window controls on the left and uses the system menu bar.
+7. **Platform chrome.** macOS draws red, amber and green window controls on the left (`window-*` tokens) and uses the system menu bar.
    Windows, Linux and the web open the app menu from the Astra mark. Window actions and native capabilities
    (`pickFolder`, `copy`, `signOut`) arrive through `AstraProvider` props (`windowActions`, `host`). Check
    `useHost()` for the capability; never import Tauri APIs in `packages/app`.

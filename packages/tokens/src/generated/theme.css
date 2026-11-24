@@ -32,6 +32,10 @@
   --marking-confidential: #F2B04C;
   --marking-restricted: #FF7A6E;
   --on-marking: #0A0A0A;
+  --window-close: #FF5F57;
+  --window-minimize: #FEBC2E;
+  --window-zoom: #28C840;
+  --on-window-control: #4D0000B3;
   --chart-1: #F5F5F5;
   --chart-2: #8CD44A;
   --chart-3: #7FA2FF;
@@ -72,6 +76,10 @@
   --marking-confidential: #F2B04C;
   --marking-restricted: #FF7A6E;
   --on-marking: #0A0A0A;
+  --window-close: #FF5F57;
+  --window-minimize: #FEBC2E;
+  --window-zoom: #28C840;
+  --on-window-control: #4D0000B3;
   --chart-1: #000000;
   --chart-2: #3A7010;
   --chart-3: #2451E6;
@@ -114,6 +122,10 @@
   --color-marking-confidential: var(--marking-confidential);
   --color-marking-restricted: var(--marking-restricted);
   --color-on-marking: var(--on-marking);
+  --color-window-close: var(--window-close);
+  --color-window-minimize: var(--window-minimize);
+  --color-window-zoom: var(--window-zoom);
+  --color-on-window-control: var(--on-window-control);
   --color-chart-1: var(--chart-1);
   --color-chart-2: var(--chart-2);
   --color-chart-3: var(--chart-3);

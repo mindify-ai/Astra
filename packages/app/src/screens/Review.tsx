@@ -88,6 +88,13 @@ function ResultCard({ result, merged }: { result: RaceResult; merged: boolean })
         >
           Merge {result.label}
         </Button>
+        <Link
+          to="/missions/$missionId/review/$resultId"
+          params={{ missionId: result.missionId, resultId: result.id }}
+          className={inlineLinkClass}
+        >
+          Review code →
+        </Link>
         <Link to="/missions/$missionId" params={{ missionId: result.missionId }} className={inlineLinkClass}>
           Open thread →
         </Link>

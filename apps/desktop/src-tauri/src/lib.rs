@@ -11,6 +11,7 @@ use astra_protocol::{Op, Presence, Snapshot};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
 
+mod files;
 mod terminal;
 
 /// A first launch starts with only you and the catalog of agents you can connect: no demo data.
@@ -362,7 +363,10 @@ pub fn run() {
             terminal::terminal_open,
             terminal::terminal_write,
             terminal::terminal_resize,
-            terminal::terminal_close
+            terminal::terminal_close,
+            files::files_list,
+            files::files_read,
+            files::files_write
         ])
         .run(tauri::generate_context!())
         .expect("error while running Astra");

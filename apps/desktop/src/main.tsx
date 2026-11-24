@@ -1,5 +1,5 @@
 import { AstraApp, type Platform } from '@astra/app'
-import { isTauri, MockClient, starterSeed, TauriClient, tauriTerminal } from '@astra/client'
+import { isTauri, MockClient, starterSeed, TauriClient, tauriFiles, tauriTerminal } from '@astra/client'
 import { writeText } from '@tauri-apps/plugin-clipboard-manager'
 import { open } from '@tauri-apps/plugin-dialog'
 import { platform as osPlatform } from '@tauri-apps/plugin-os'
@@ -62,6 +62,7 @@ function startNode() {
               },
               copy: (text) => writeText(text),
               terminal: desktop ? tauriTerminal : undefined,
+              files: desktop ? tauriFiles : undefined,
             }}
           />
         </StrictMode>,

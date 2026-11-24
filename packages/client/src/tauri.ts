@@ -1,3 +1,4 @@
+import type { FileEntry, FilesHost } from './files'
 import { HlcClock } from './hlc'
 import { Store } from './store'
 import type { TerminalHost } from './terminal'
@@ -90,5 +91,21 @@ export const tauriTerminal: TerminalHost = {
       resize: (c, r) => void invoke('terminal_resize', { id, cols: c, rows: r }).catch(() => {}),
       close: () => void invoke('terminal_close', { id }).catch(() => {}),
     }
+  },
+}
+
+/** The desktop app's file access for the code editor. The Rust shell confines every path to `root`. */
+export const tauriFiles: FilesHost = {
+  async list(root, dir) {
+    const { invoke } = await import('@tauri-apps/api/core')
+    return invoke<FileEntry[]>('files_list', { root, dir })
+  },
+  async read(root, path) {
+    const { invoke } = await import('@tauri-apps/api/core')
+    return invoke<string>('files_read', { root, path })
+  },
+  async write(root, path, text) {
+    const { invoke } = await import('@tauri-apps/api/core')
+    await invoke('files_write', { root, path, text })
   },
 }

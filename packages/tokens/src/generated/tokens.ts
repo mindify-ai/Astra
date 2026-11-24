@@ -120,6 +120,22 @@ export const colors = {
     "dark": "#0A0A0A",
     "light": "#0A0A0A"
   },
+  "window-close": {
+    "dark": "#FF5F57",
+    "light": "#FF5F57"
+  },
+  "window-minimize": {
+    "dark": "#FEBC2E",
+    "light": "#FEBC2E"
+  },
+  "window-zoom": {
+    "dark": "#28C840",
+    "light": "#28C840"
+  },
+  "on-window-control": {
+    "dark": "#4D0000B3",
+    "light": "#4D0000B3"
+  },
   "chart-1": {
     "dark": "#F5F5F5",
     "light": "#000000"

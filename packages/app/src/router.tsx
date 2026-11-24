@@ -10,6 +10,7 @@ import {
 import { useAstraState, usePlatform } from './context'
 import { MobileAgents, MobileHome, MobilePeople, MobileReview, MobileThread } from './mobile/MobileScreens'
 import { Board } from './screens/Board'
+import { CodeReview } from './screens/CodeReview'
 import { Connect } from './screens/Connect'
 import { Home } from './screens/Home'
 import { Launch } from './screens/Launch'
@@ -105,6 +106,14 @@ const reviewRoute = createRoute({
     )
   },
 })
+const codeReviewRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/missions/$missionId/review/$resultId',
+  component: function CodeReviewRoute() {
+    const { missionId, resultId } = codeReviewRoute.useParams()
+    return <CodeReview key={resultId} missionId={missionId} resultId={resultId} />
+  },
+})
 const mergedRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/missions/$missionId/merged',
@@ -134,6 +143,7 @@ const routeTree = rootRoute.addChildren([
   threadRoute,
   mapRoute,
   reviewRoute,
+  codeReviewRoute,
   mergedRoute,
   boardRoute,
   agentsRoute,
