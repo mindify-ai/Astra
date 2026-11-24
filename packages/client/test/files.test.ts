@@ -40,3 +40,12 @@ describe('memory files', () => {
     expect(relativeSegments('./a//b/')).toEqual(['a', 'b'])
   })
 })
+
+describe('memoryFiles base', () => {
+  it('serves committed copies when given, and has no base otherwise', async () => {
+    const withBase = memoryFiles({ 'a.ts': 'new' }, { 'a.ts': 'old' })
+    expect(await withBase.base?.('/r', 'a.ts')).toBe('old')
+    expect(await withBase.base?.('/r', 'b.ts')).toBeNull()
+    expect(memoryFiles({ 'a.ts': 'x' }).base).toBeUndefined()
+  })
+})

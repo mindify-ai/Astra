@@ -129,6 +129,7 @@ version = "0.1.0"
 dependencies = [
  "astra-node",
  "astra-protocol",
+ "git2",
  "portable-pty",
  "serde",
  "serde_json",

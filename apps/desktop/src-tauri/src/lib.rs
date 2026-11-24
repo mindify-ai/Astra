@@ -366,7 +366,8 @@ pub fn run() {
             terminal::terminal_close,
             files::files_list,
             files::files_read,
-            files::files_write
+            files::files_write,
+            files::files_base
         ])
         .run(tauri::generate_context!())
         .expect("error while running Astra");

@@ -204,6 +204,40 @@ pub fn write(root: &str, path: &str, text: &str) -> Result<(), String> {
     std::fs::write(&target, text).map_err(|e| format!("Cannot save {path}: {e}"))
 }
 
+/// The file as last committed (the repository's `HEAD`), for the editor's diff. `None` when the folder isn't
+/// in a git repository, the file is new (untracked), or the committed copy isn't UTF-8 text under 2 MB.
+pub fn base(root: &str, path: &str) -> Result<Option<String>, String> {
+    let root = root_dir(root)?;
+    let file = confine(&root, path)?;
+    Ok(committed_text(&file))
+}
+
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+fn committed_text(file: &Path) -> Option<String> {
+    let repo = git2::Repository::discover(file.parent()?).ok()?;
+    let workdir = repo.workdir()?.canonicalize().ok()?;
+    let rel = file.strip_prefix(&workdir).ok()?;
+    // Tree paths are `/`-separated on every platform.
+    let rel: Vec<String> = rel
+        .components()
+        .map(|c| c.as_os_str().to_str().map(str::to_string))
+        .collect::<Option<_>>()?;
+    let tree = repo.head().ok()?.peel_to_tree().ok()?;
+    let entry = tree.get_path(Path::new(&rel.join("/"))).ok()?;
+    let object = entry.to_object(&repo).ok()?;
+    let blob = object.as_blob()?;
+    if blob.size() as u64 > MAX_BYTES {
+        return None;
+    }
+    std::str::from_utf8(blob.content()).ok().map(str::to_string)
+}
+
+/// Phones have no working copy to compare.
+#[cfg(any(target_os = "ios", target_os = "android"))]
+fn committed_text(_file: &Path) -> Option<String> {
+    None
+}
+
 async fn blocking<T: Send + 'static>(
     f: impl FnOnce() -> Result<T, String> + Send + 'static,
 ) -> Result<T, String> {
@@ -225,6 +259,11 @@ pub async fn files_read(root: String, path: String) -> Result<String, String> {
 #[tauri::command]
 pub async fn files_write(root: String, path: String, text: String) -> Result<(), String> {
     blocking(move || write(&root, &path, &text)).await
+}
+
+#[tauri::command]
+pub async fn files_base(root: String, path: String) -> Result<Option<String>, String> {
+    blocking(move || base(&root, &path)).await
 }
 
 #[cfg(test)]
@@ -258,6 +297,27 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn base_is_the_committed_copy() {
+        let tmp = Tmp::new("base");
+        let root = tmp.root();
+        // Not a repository yet: nothing to compare with.
+        assert_eq!(base(&root, "src/main.ts").unwrap(), None);
+        let repo = git2::Repository::init(tmp.0.join("repo")).unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("src/main.ts")).unwrap();
+        index.write().unwrap();
+        let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+        let sig = git2::Signature::now("t", "t@example.com").unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[]).unwrap();
+
+        fs::write(tmp.0.join("repo/src/main.ts"), "export const a = 1\n").unwrap();
+        fs::write(tmp.0.join("repo/src/new.ts"), "new\n").unwrap();
+        assert_eq!(base(&root, "src/main.ts").unwrap().as_deref(), Some("export {}\n"));
+        assert_eq!(base(&root, "src/new.ts").unwrap(), None);
+        assert!(base(&root, "../outside/secret.txt").is_err());
     }
 
     #[test]

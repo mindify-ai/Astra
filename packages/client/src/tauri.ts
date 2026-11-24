@@ -108,4 +108,8 @@ export const tauriFiles: FilesHost = {
     const { invoke } = await import('@tauri-apps/api/core')
     await invoke('files_write', { root, path, text })
   },
+  async base(root, path) {
+    const { invoke } = await import('@tauri-apps/api/core')
+    return invoke<string | null>('files_base', { root, path })
+  },
 }

@@ -17,6 +17,12 @@ export interface FilesHost {
   read(root: string, path: string): Promise<string>
   /** Replaces a file's contents (creating the file if its folder exists). */
   write(root: string, path: string, text: string): Promise<void>
+  /**
+   * The file as last committed (git `HEAD`), which the editor colours changes against. Null when there is
+   * no committed copy (a new file, or a folder outside version control). Hosts without version control leave
+   * it out, and the editor compares with the last saved text instead.
+   */
+  base?(root: string, path: string): Promise<string | null>
 }
 
 /** Folders the explorer never shows: version control internals and build output. */
@@ -39,12 +45,23 @@ const byKindThenName = (a: FileEntry, b: FileEntry) =>
  * An in-memory file tree (the web demo and tests). Keys are file paths relative to the root; folders are
  * implied by them. One tree serves every `root`.
  */
-export function memoryFiles(initial: Record<string, string>): FilesHost {
+export function memoryFiles(
+  initial: Record<string, string>,
+  /** Committed copies by path, for `base`; leave it out for a tree without version control. */
+  bases?: Record<string, string>,
+): FilesHost {
   const files = new Map<string, string>()
   for (const [path, text] of Object.entries(initial)) files.set(relativeSegments(path).join('/'), text)
   const hasDir = (dir: string) => dir === '' || [...files.keys()].some((p) => p.startsWith(`${dir}/`))
 
+  const committed = bases
+    ? new Map(Object.entries(bases).map(([p, t]) => [relativeSegments(p).join('/'), t]))
+    : null
+
   return {
+    ...(committed
+      ? { base: async (_root: string, path: string) => committed.get(relativeSegments(path).join('/')) ?? null }
+      : {}),
     async list(_root, dir) {
       const d = relativeSegments(dir).join('/')
       if (!hasDir(d)) throw new Error(`No such folder: ${dir}`)
