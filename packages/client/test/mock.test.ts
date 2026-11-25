@@ -46,6 +46,21 @@ describe('mock node', () => {
     expect(outcome?.error).toMatch(/steering/i)
   })
 
+  it('answers a side question in its side thread without taking steering', async () => {
+    const c = client()
+    // Lin holds the builder; a side question to it is still answered, and steering doesn't move.
+    const outcome = await sendMessage(c, 'm-014', 'ma-014-builder', 'What are you on?', 'side-1')
+    expect(outcome).toEqual({ ok: true, error: null })
+    const s = c.getState()
+    expect(s.missionAgents['ma-014-builder']?.steeredBy).toBe('p-lin')
+    const side = Object.values(s.messages).filter((m) => m.side === 'side-1')
+    expect(side.map((m) => m.author)).toEqual([
+      { type: 'person', personId: 'p-mark' },
+      { type: 'agent', missionAgentId: 'ma-014-builder' },
+    ])
+    expect(side[0]).toMatchObject({ steering: null, to: 'ma-014-builder' })
+  })
+
   it('lets steerers approve only when the agent or mission allows it', async () => {
     const c = client()
     const lin = (bodyType: 'approve') => [

@@ -6,7 +6,9 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use astra_llm::{ChatMessage, Provider, Router, StopReason, TurnRequest};
 use astra_protocol::*;
+use futures::future::BoxFuture;
 use serde_json::{Value, json};
 use tokio::sync::{mpsc, oneshot, watch};
 
@@ -40,6 +42,32 @@ fn read<R>(host: &dyn NodeHost, f: impl Fn(&State) -> R) -> R {
 /// Builds adapters from protocol adapter configs (override in tests).
 pub type AdapterFactory = Arc<dyn Fn(&Adapter) -> Box<dyn AgentAdapter> + Send + Sync>;
 
+/// Picks the model provider that answers side questions (override in tests).
+pub type SideProviderFactory = Arc<
+    dyn Fn(Arc<dyn SecretStore>) -> BoxFuture<'static, Result<Arc<dyn Provider>, String>>
+        + Send
+        + Sync,
+>;
+
+/// The default side-question provider: the built-in agent's routing (cloud when keyed and reachable, else
+/// the first local model server).
+pub fn default_side_provider() -> SideProviderFactory {
+    Arc::new(|secrets: Arc<dyn SecretStore>| {
+        Box::pin(async move {
+            let config = adapters::builtin::BuiltinAdapter {
+                policy: ProviderPolicy::Auto,
+                model: None,
+                router_override: None,
+            }
+            .router_config(secrets.as_ref());
+            Router::new(config)
+                .select()
+                .await
+                .map_err(|e| e.to_string())
+        })
+    })
+}
+
 /// Orchestrator configuration.
 #[derive(Clone)]
 pub struct OrchestratorConfig {
@@ -47,6 +75,8 @@ pub struct OrchestratorConfig {
     pub data_dir: PathBuf,
     pub secrets: Arc<dyn SecretStore>,
     pub adapters: AdapterFactory,
+    /// Answers side questions (`sendMessage` with `side`).
+    pub side_provider: SideProviderFactory,
 }
 
 impl OrchestratorConfig {
@@ -56,6 +86,7 @@ impl OrchestratorConfig {
             data_dir: data_dir.into(),
             secrets,
             adapters: Arc::new(adapters::for_config),
+            side_provider: default_side_provider(),
         }
     }
 }
@@ -297,7 +328,8 @@ impl Orchestrator {
                 mission_id,
                 to,
                 body,
-            } => self.send_message(&mission_id, to.as_deref(), &body, &actor),
+                side,
+            } => self.send_message(&mission_id, to.as_deref(), &body, side.as_deref(), &actor),
             Command::TakeSteering { mission_agent_id } => {
                 self.take_steering(&mission_agent_id, &actor)
             }
@@ -473,6 +505,7 @@ impl Orchestrator {
                 log: vec![],
                 approval_id: Some(approval_id.clone()),
                 at: now_rfc3339(),
+                side: None,
             }),
             OpBody::patch(
                 EntityKind::Mission,
@@ -513,6 +546,7 @@ impl Orchestrator {
         mission_id: &str,
         to: Option<&str>,
         body: &str,
+        side: Option<&str>,
         actor: &str,
     ) -> CmdResult {
         let (exists, steerable, target) = read(self.host(), |s| {
@@ -529,6 +563,14 @@ impl Orchestrator {
         }
         if !steerable {
             return Err(format!("{actor} may not steer mission {mission_id}"));
+        }
+        if let Some(side) = side {
+            if let Some(ma_id) = to
+                && !target.flatten().is_some_and(|m| m.mission_id == mission_id)
+            {
+                return Err(format!("unknown agent {ma_id}"));
+            }
+            return self.side_question(mission_id, to, body, side, actor);
         }
         match to {
             Some(ma_id) => {
@@ -590,6 +632,100 @@ impl Orchestrator {
             }
         }
         Ok(())
+    }
+
+    /// A side question: answered from the mission's context by a one-shot model call, in the same side thread,
+    /// as one agent message. Nothing reaches the running agents and no steering or status changes.
+    fn side_question(
+        &self,
+        mission_id: &str,
+        to: Option<&str>,
+        question: &str,
+        side: &str,
+        actor: &str,
+    ) -> CmdResult {
+        if side.is_empty() {
+            return Err("the side thread id is empty".into());
+        }
+        let (answerer, prompt) = read(self.host(), |s| {
+            let answerer = match to {
+                Some(id) => Some(id.to_string()),
+                None => side_answerer(s, mission_id),
+            };
+            let prompt = s
+                .missions
+                .get(mission_id)
+                .map(|m| side_prompt(s, m, side, question, actor));
+            (answerer, prompt)
+        });
+        let answerer =
+            answerer.ok_or_else(|| format!("mission {mission_id} has no agent to answer"))?;
+        let prompt = prompt.ok_or_else(|| format!("unknown mission {mission_id}"))?;
+        let o = self.clone();
+        let (mission_id, side) = (mission_id.to_string(), side.to_string());
+        tokio::spawn(async move {
+            let body = match o.ask_side(&prompt).await {
+                Ok(answer) => answer,
+                Err(e) => {
+                    tracing::warn!(mission = %mission_id, error = %e, "side question not answered");
+                    format!("I can't answer side questions right now: {e}")
+                }
+            };
+            // The mission may have been deleted while the model answered.
+            if !read(o.host(), |s| s.missions.contains_key(&mission_id)) {
+                return;
+            }
+            o.emit(vec![OpBody::put(Message {
+                id: format!("msg-{}", ulid_suffix()),
+                mission_id,
+                author: Author::Agent {
+                    mission_agent_id: answerer,
+                },
+                steering: None,
+                to: None,
+                body,
+                plan: vec![],
+                log: vec![],
+                approval_id: None,
+                at: now_rfc3339(),
+                side: Some(side),
+            })]);
+        });
+        Ok(())
+    }
+
+    /// One model turn without tools.
+    async fn ask_side(&self, prompt: &str) -> Result<String, String> {
+        let config = &self.inner.config;
+        let turn = async {
+            let provider = (config.side_provider)(config.secrets.clone()).await?;
+            let messages = [ChatMessage::user(prompt)];
+            provider
+                .turn(
+                    TurnRequest {
+                        system: SIDE_SYSTEM,
+                        tools: &[],
+                        messages: &messages,
+                    },
+                    &|_| {},
+                )
+                .await
+                .map_err(|e| e.to_string())
+        };
+        let response = tokio::time::timeout(SIDE_TIMEOUT, turn)
+            .await
+            .map_err(|_| "the model took too long to answer".to_string())??;
+        if response.stop_reason == StopReason::Refusal {
+            return Err(format!(
+                "the model declined: {}",
+                response.refusal.unwrap_or_else(|| "no details".into())
+            ));
+        }
+        let answer = response.message.text().trim().to_string();
+        if answer.is_empty() {
+            return Err("the model gave no answer".into());
+        }
+        Ok(answer)
     }
 
     /// Starts a new session for an agent that is not running (it finished, failed, or Astra restarted), in its
@@ -1019,6 +1155,7 @@ impl Orchestrator {
                             log: st.log.clone(),
                             approval_id: None,
                             at: now_rfc3339(),
+                            side: None,
                         }));
                         st.message_id = Some(id);
                     }
@@ -1741,6 +1878,7 @@ impl Orchestrator {
                         log: vec![],
                         approval_id: None,
                         at: now_rfc3339(),
+                        side: None,
                     }),
                     OpBody::patch(
                         EntityKind::Mission,
@@ -2208,6 +2346,185 @@ fn git2_check(path: &std::path::Path, base: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// The system prompt for side questions.
+const SIDE_SYSTEM: &str = "You answer a side question about a coding mission in Astra, asked in a side chat next to \
+the mission's main thread. The mission's agents keep working and never see this side chat. You are read-only: you \
+cannot read files, run commands, message the agents or take any other action, so never offer to. Answer from the \
+mission context you are given, concisely and plainly. If the context does not tell, say so instead of guessing.";
+/// How long a side question may take.
+const SIDE_TIMEOUT: Duration = Duration::from_secs(180);
+/// Main-thread messages included in a side question's context.
+const SIDE_CONTEXT_MESSAGES: usize = 30;
+
+/// Who answers a side question not addressed to an agent: the planner, else the first enabled agent.
+fn side_answerer(s: &State, mission_id: &str) -> Option<String> {
+    let mut agents: Vec<&MissionAgent> = s
+        .mission_agents
+        .values()
+        .filter(|m| m.mission_id == mission_id)
+        .collect();
+    agents.sort_by_key(|m| (!m.enabled, m.role != Role::Planner, role_rank(m.role)));
+    agents.first().map(|m| m.id.clone())
+}
+
+fn role_title(r: Role) -> &'static str {
+    match r {
+        Role::Planner => "Planner",
+        Role::Builder => "Builder",
+        Role::Tester => "Tester",
+        Role::Writer => "Writer",
+        Role::Reviewer => "Reviewer",
+    }
+}
+
+fn author_name(s: &State, author: &Author) -> String {
+    match author {
+        Author::Person { person_id } => s
+            .people
+            .get(person_id)
+            .map(|p| p.name.clone())
+            .unwrap_or_else(|| person_id.clone()),
+        Author::Agent { mission_agent_id } => match s.mission_agents.get(mission_agent_id) {
+            Some(ma) => match s.agents.get(&ma.agent_id) {
+                Some(a) => format!("{} ({})", role_title(ma.role), a.name),
+                None => role_title(ma.role).to_string(),
+            },
+            None => "Agent".into(),
+        },
+    }
+}
+
+fn clip(text: &str, max: usize) -> String {
+    let text = text.trim();
+    match text.char_indices().nth(max) {
+        Some((i, _)) => format!("{}…", &text[..i]),
+        None => text.to_string(),
+    }
+}
+
+/// One thread message as context lines: `Name: body`, then its plan and activity in brief.
+fn side_line(s: &State, m: &Message) -> String {
+    let mut line = format!("{}: {}", author_name(s, &m.author), clip(&m.body, 1200));
+    if !m.plan.is_empty() {
+        let plan: Vec<String> = m
+            .plan
+            .iter()
+            .enumerate()
+            .map(|(i, p)| format!("{}. {}", i + 1, clip(&p.text, 160)))
+            .collect();
+        line.push_str(&format!("\n  plan: {}", plan.join("; ")));
+    }
+    if !m.log.is_empty() {
+        let shown: Vec<String> = m
+            .log
+            .iter()
+            .take(8)
+            .map(|l| format!("{} {}", l.verb, clip(&l.target, 120)))
+            .collect();
+        let more = m.log.len().saturating_sub(shown.len());
+        let more = if more > 0 {
+            format!(" (+{more} more)")
+        } else {
+            String::new()
+        };
+        line.push_str(&format!("\n  activity: {}{more}", shown.join("; ")));
+    }
+    line
+}
+
+/// The one-shot prompt for a side question: the mission, its agents, the recent main thread, this side thread
+/// so far and the question.
+fn side_prompt(s: &State, mission: &Mission, side: &str, question: &str, asker: &str) -> String {
+    let mut thread: Vec<&Message> = s
+        .messages
+        .values()
+        .filter(|m| m.mission_id == mission.id)
+        .collect();
+    thread.sort_by(|a, b| (&a.at, &a.id).cmp(&(&b.at, &b.id)));
+    let main: Vec<&Message> = thread
+        .iter()
+        .copied()
+        .filter(|m| m.side.is_none())
+        .collect();
+    let main = &main[main.len().saturating_sub(SIDE_CONTEXT_MESSAGES)..];
+    let mut earlier: Vec<&Message> = thread
+        .iter()
+        .copied()
+        .filter(|m| m.side.as_deref() == Some(side))
+        .collect();
+    // The client puts the question itself before the command; it is quoted below instead.
+    if let Some(i) = earlier.iter().rposition(|m| {
+        matches!(&m.author, Author::Person { .. }) && m.body.trim() == question.trim()
+    }) {
+        earlier.remove(i);
+    }
+
+    let status = serde_json::to_value(mission.status)
+        .ok()
+        .and_then(|v| v.as_str().map(str::to_string))
+        .unwrap_or_default();
+    let mut out = format!(
+        "Mission #{}: {}\nGoal: {}\nStatus: {status}\n",
+        mission.number, mission.title, mission.goal
+    );
+    let mut agents: Vec<&MissionAgent> = s
+        .mission_agents
+        .values()
+        .filter(|m| m.mission_id == mission.id && m.enabled)
+        .collect();
+    agents.sort_by_key(|m| (role_rank(m.role), m.id.clone()));
+    if !agents.is_empty() {
+        out.push_str("\nAgents:\n");
+        for ma in agents {
+            let status = serde_json::to_value(ma.status)
+                .ok()
+                .and_then(|v| v.as_str().map(str::to_string))
+                .unwrap_or_default();
+            out.push_str(&format!(
+                "- {}: {status}",
+                author_name(
+                    s,
+                    &Author::Agent {
+                        mission_agent_id: ma.id.clone()
+                    }
+                )
+            ));
+            if let Some(task) = &ma.task {
+                out.push_str(&format!(", on: {}", clip(task, 200)));
+            }
+            if let Some(detail) = &ma.status_detail {
+                out.push_str(&format!(" ({})", clip(detail, 200)));
+            }
+            out.push('\n');
+        }
+    }
+    out.push_str("\nMain thread, oldest first:\n");
+    if main.is_empty() {
+        out.push_str("(no messages yet)\n");
+    }
+    for m in main {
+        out.push_str(&side_line(s, m));
+        out.push('\n');
+    }
+    if !earlier.is_empty() {
+        out.push_str("\nThis side chat so far:\n");
+        for m in earlier {
+            out.push_str(&side_line(s, m));
+            out.push('\n');
+        }
+    }
+    let asker = s
+        .people
+        .get(asker)
+        .map(|p| p.name.clone())
+        .unwrap_or_else(|| asker.to_string());
+    out.push_str(&format!(
+        "\nSide question from {asker}:\n{}",
+        question.trim()
+    ));
+    out
+}
+
 fn role_rank(r: Role) -> u8 {
     match r {
         Role::Planner => 0,
@@ -2372,5 +2689,123 @@ mod tests {
             Some("B")
         );
         assert_eq!(parse_pick("no idea", &labels), None);
+    }
+
+    fn message(id: &str, author: Author, body: &str, at: &str, side: Option<&str>) -> Entity {
+        Entity::Message(Message {
+            id: id.into(),
+            mission_id: "m-1".into(),
+            author,
+            steering: None,
+            to: None,
+            body: body.into(),
+            plan: vec![],
+            log: vec![LogLine {
+                verb: "edit".into(),
+                target: "src/hello.rs".into(),
+            }],
+            approval_id: None,
+            at: at.into(),
+            side: side.map(str::to_string),
+        })
+    }
+
+    #[test]
+    fn side_prompt_has_the_main_thread_this_side_thread_and_the_question() {
+        let mut s = State::new("ws", "p-owner");
+        let mission: Mission = serde_json::from_value(json!({
+            "id": "m-1", "number": 7, "title": "Add a greeting", "shortName": "GREETING",
+            "goal": "Add a greeting file.", "mode": "split", "repoId": "r-1", "baseBranch": "main",
+            "branch": "astra/greeting", "status": "working", "approvalPolicy": "owner", "ownerId": "p-owner",
+            "nodeId": null, "stats": null, "createdAt": "2026-11-21T09:00:00Z", "archivedAt": null
+        }))
+        .expect("mission");
+        let ma: MissionAgent = serde_json::from_value(json!({
+            "id": "ma-b", "missionId": "m-1", "agentId": "a-1", "role": "builder", "enabled": true,
+            "status": "working", "statusDetail": null, "steeredBy": null, "task": "Add hello.rs",
+            "startedAt": null, "branch": null, "latest": [], "agentTypeId": null
+        }))
+        .expect("mission agent");
+        let person = |id: &str, name: &str| {
+            Entity::Person(Person {
+                id: id.into(),
+                name: name.into(),
+                initials: "X".into(),
+            })
+        };
+        let me = || Author::Person {
+            person_id: "p-owner".into(),
+        };
+        let builder = || Author::Agent {
+            mission_agent_id: "ma-b".into(),
+        };
+        for e in [
+            Entity::Mission(mission.clone()),
+            Entity::MissionAgent(ma),
+            person("p-owner", "Mark"),
+            message(
+                "msg-1",
+                me(),
+                "Please add a greeting",
+                "2026-11-21T09:01:00Z",
+                None,
+            ),
+            message(
+                "msg-2",
+                builder(),
+                "Adding it now",
+                "2026-11-21T09:02:00Z",
+                None,
+            ),
+            message(
+                "msg-3",
+                me(),
+                "Earlier side question",
+                "2026-11-21T09:03:00Z",
+                Some("side-a"),
+            ),
+            message(
+                "msg-4",
+                builder(),
+                "Earlier side answer",
+                "2026-11-21T09:03:30Z",
+                Some("side-a"),
+            ),
+            message(
+                "msg-5",
+                me(),
+                "Another side thread",
+                "2026-11-21T09:04:00Z",
+                Some("side-b"),
+            ),
+            message(
+                "msg-6",
+                me(),
+                "Is it done yet?",
+                "2026-11-21T09:05:00Z",
+                Some("side-a"),
+            ),
+        ] {
+            s.insert(e);
+        }
+        let p = side_prompt(&s, &mission, "side-a", "Is it done yet?", "p-owner");
+        assert!(p.starts_with(
+            "Mission #7: Add a greeting\nGoal: Add a greeting file.\nStatus: working"
+        ));
+        assert!(p.contains("- Builder: working, on: Add hello.rs"));
+        assert!(p.contains("Mark: Please add a greeting"));
+        assert!(p.contains("Builder: Adding it now\n  activity: edit src/hello.rs"));
+        assert!(p.contains("This side chat so far:\nMark: Earlier side question"));
+        assert!(p.contains("Builder: Earlier side answer"));
+        assert!(!p.contains("Another side thread"));
+        // The question is quoted once, at the end, not as part of the side chat so far.
+        assert_eq!(p.matches("Is it done yet?").count(), 1);
+        assert!(p.ends_with("Side question from Mark:\nIs it done yet?"));
+        let main_at = p.find("Main thread").expect("main");
+        assert!(p.find("Please add a greeting").expect("msg-1") > main_at);
+        assert!(
+            p.find("Earlier side question").expect("msg-3")
+                > p.find("Adding it now").expect("msg-2")
+        );
     }
 }

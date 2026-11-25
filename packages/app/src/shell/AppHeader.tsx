@@ -76,6 +76,17 @@ function AppMenu() {
           <Link role="menuitem" to="/code" className={item} onClick={() => setOpen(false)}>
             Code editor
           </Link>
+          <Link
+            role="menuitem"
+            to="/code"
+            className={item}
+            onClick={() => {
+              setOpen(false)
+              ui.setLayout((l) => ({ ...l, browser: { ...l.browser, open: true } }))
+            }}
+          >
+            Browser
+          </Link>
           {host.terminal ? (
             <button
               type="button"

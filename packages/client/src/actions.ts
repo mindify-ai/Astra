@@ -131,6 +131,7 @@ export async function createMission(client: AstraClient, draft: MissionDraft): P
       plan: [],
       log: [],
       approvalId: null,
+      side: null,
       at: new Date().toISOString(),
     },
   ]
@@ -152,11 +153,16 @@ export function approve(client: AstraClient, approvalId: Id, allow: boolean) {
 
 /** Writes the human message, then asks the node to deliver it (steering the target agent if `to` is set). */
 /** Posts a message to the thread and delivers it; resolves with the node's answer (it may restart an agent). */
+/**
+ * Posts a message on a mission. With `side` set it goes to that side thread instead of the main one: the node
+ * answers it from the mission's context without delivering it to the running agents or taking steering.
+ */
 export async function sendMessage(
   client: AstraClient,
   missionId: Id,
   to: Id | null,
   body: string,
+  side: Id | null = null,
 ): Promise<CommandOutcome | null> {
   const state = client.getState()
   const text = body.trim()
@@ -169,19 +175,23 @@ export async function sendMessage(
         id: `msg-${ulid().toLowerCase()}`,
         missionId,
         author: { type: 'person', personId: state.me },
-        steering: to,
+        steering: side ? null : to,
         to,
         body: text,
         plan: [],
         log: [],
         approvalId: null,
+        side,
         at: new Date().toISOString(),
       },
     },
-    command(nodeForMission(state, missionId), { type: 'sendMessage', missionId, to, body: text }),
+    command(nodeForMission(state, missionId), { type: 'sendMessage', missionId, to, body: text, side }),
   ])
   return outcomeOf(client, ops)
 }
+
+/** A new side-thread id for `sendMessage`. */
+export const newSideThreadId = () => `side-${ulid().toLowerCase()}`
 
 export function merge(client: AstraClient, resultId: Id) {
   const state = client.getState()

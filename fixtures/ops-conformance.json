@@ -621,6 +621,115 @@
           }
         }
       ]
+    },
+    {
+      "name": "message side thread: a side message keeps its side id; an op written before the field still applies",
+      "initial": [],
+      "ops": [
+        {
+          "id": "01J0000000000000000000SD01",
+          "hlc": "0001732180000100:000000:n1",
+          "actor": "p-mark",
+          "body": {
+            "type": "put",
+            "entity": {
+              "kind": "message",
+              "id": "msg-s1",
+              "missionId": "m-1",
+              "author": {
+                "type": "person",
+                "personId": "p-mark"
+              },
+              "steering": null,
+              "to": null,
+              "body": "What is the builder doing?",
+              "plan": [],
+              "log": [],
+              "approvalId": null,
+              "at": "2026-11-21T09:30:00Z",
+              "side": "side-1"
+            }
+          }
+        },
+        {
+          "id": "01J0000000000000000000SD02",
+          "hlc": "0001732180000200:000000:n-desk",
+          "actor": "n-desk",
+          "body": {
+            "type": "put",
+            "entity": {
+              "kind": "message",
+              "id": "msg-s2",
+              "missionId": "m-1",
+              "author": {
+                "type": "agent",
+                "missionAgentId": "ma-1"
+              },
+              "steering": null,
+              "to": null,
+              "body": "It is adding the greeting file.",
+              "plan": [],
+              "log": [],
+              "approvalId": null,
+              "at": "2026-11-21T09:30:05Z",
+              "side": "side-1"
+            }
+          }
+        },
+        {
+          "id": "01J0000000000000000000SD03",
+          "hlc": "0001732180000300:000000:n1",
+          "actor": "p-mark",
+          "body": {
+            "type": "put",
+            "entity": {
+              "kind": "message",
+              "id": "msg-old",
+              "missionId": "m-1",
+              "author": {
+                "type": "person",
+                "personId": "p-mark"
+              },
+              "steering": null,
+              "to": null,
+              "body": "Written before side threads existed.",
+              "plan": [],
+              "log": [],
+              "approvalId": null,
+              "at": "2026-11-21T09:00:00Z"
+            }
+          }
+        }
+      ],
+      "expect": [
+        {
+          "kind": "message",
+          "id": "msg-s1",
+          "fields": {
+            "side": "side-1",
+            "body": "What is the builder doing?"
+          }
+        },
+        {
+          "kind": "message",
+          "id": "msg-s2",
+          "fields": {
+            "side": "side-1",
+            "author": {
+              "type": "agent",
+              "missionAgentId": "ma-1"
+            }
+          }
+        },
+        {
+          "kind": "message",
+          "id": "msg-old",
+          "fields": {
+            "body": "Written before side threads existed.",
+            "side": null
+          }
+        }
+      ]
     }
   ],
   "rules": [

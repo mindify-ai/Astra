@@ -78,3 +78,24 @@ export const UsersIcon = ({ size = 20, ...p }: IconProps) => (
     <path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
   </svg>
 )
+export const ReloadIcon = ({ size = 16, ...p }: IconProps) => (
+  <svg {...stroke(size, p)}>
+    <path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v4h-4" />
+  </svg>
+)
+export const ExternalIcon = ({ size = 16, ...p }: IconProps) => (
+  <svg {...stroke(size, p)}>
+    <path d="M14 4h6v6M20 4l-9 9M18 14v6H4V6h6" />
+  </svg>
+)
+export const GlobeIcon = ({ size = 16, ...p }: IconProps) => (
+  <svg {...stroke(size, p)}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M3 12h18M12 3c2.5 2.5 3.5 5.5 3.5 9s-1 6.5-3.5 9c-2.5-2.5-3.5-5.5-3.5-9s1-6.5 3.5-9z" />
+  </svg>
+)
+export const ChatIcon = ({ size = 16, ...p }: IconProps) => (
+  <svg {...stroke(size, p)}>
+    <path d="M4 5h16v11H9l-5 4z" />
+  </svg>
+)

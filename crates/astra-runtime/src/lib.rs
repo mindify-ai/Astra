@@ -8,5 +8,7 @@ pub mod policy;
 pub mod process;
 pub mod secrets;
 
-pub use orchestrator::{NodeHost, Orchestrator, OrchestratorConfig};
+pub use orchestrator::{
+    NodeHost, Orchestrator, OrchestratorConfig, SideProviderFactory, default_side_provider,
+};
 pub use secrets::{MemorySecrets, SecretStore};

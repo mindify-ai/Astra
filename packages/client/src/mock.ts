@@ -31,6 +31,27 @@ const roleWord = {
   writer: 'Writer',
 } as const
 
+/** Who answers a side question nobody was addressed in: the planner first, as the runner node picks. */
+const sideRoleOrder: MissionAgent['role'][] = ['planner', 'builder', 'tester', 'writer', 'reviewer']
+
+/** The demo node's side-chat reply: what each agent is doing right now, read from the mission's state. */
+function sideAnswer(s: State, missionId: Id): string {
+  const mission = s.missions[missionId]
+  const lines = Object.values(s.missionAgents)
+    .filter((m) => m.missionId === missionId && m.enabled)
+    .map((m) => {
+      const now = m.latest[m.latest.length - 1]
+      const doing = now ? `last ${now.verb} \`${now.target}\`` : (m.statusDetail ?? 'nothing yet')
+      return `- **${roleWord[m.role]}** is ${m.status}: ${doing}`
+    })
+  return [
+    `This is a side answer, so the main thread and the agents carry on undisturbed. ${mission ? `"${mission.title}" is ${mission.status}.` : ''}`,
+    ...lines,
+    '',
+    '_The demo node answers from the mission state; a runner node asks a model with the thread as context._',
+  ].join('\n')
+}
+
 /**
  * In-browser client for the web demo, tests and design review. It plays the part of a runner
  * node: command ops get the same follow-up ops a real node would write (PROTOCOL.md "Who writes what").
@@ -97,6 +118,7 @@ export class MockClient extends Store {
         plan: [],
         log: [],
         approvalId: null,
+        side: null,
         at: new Date().toISOString(),
         ...extra,
       },
@@ -156,6 +178,30 @@ export class MockClient extends Store {
         }
         case 'sendMessage': {
           if (!maySteer(s, cmd.missionId, op.actor)) return this.ok(node, op, 'not allowed to steer')
+          if (cmd.side === '') return this.ok(node, op, 'empty side thread id')
+          if (cmd.side) {
+            // A side question: never delivered to the running agents and never takes steering; one reply in
+            // the same side thread, answered from what the mission shows.
+            const rankOf = (r: MissionAgent['role']) => sideRoleOrder.indexOf(r)
+            const agents = this.agentsOf(s, cmd.missionId)
+              .filter((m) => m.enabled)
+              .sort((a, b) => rankOf(a.role) - rankOf(b.role))
+            const target = cmd.to ? s.missionAgents[cmd.to] : agents[0]
+            if (cmd.to && (!target || target.missionId !== cmd.missionId)) {
+              return this.ok(node, op, `unknown agent ${cmd.to}`)
+            }
+            if (!target) return this.ok(node, op, `mission ${cmd.missionId} has no agent to answer`)
+            this.ok(node, op)
+            {
+              const side = cmd.side
+              this.later(() => {
+                this.node(node, [
+                  this.agentMessage(target, sideAnswer(this.getState(), cmd.missionId), { side }),
+                ])
+              })
+            }
+            return
+          }
           const target = cmd.to
             ? s.missionAgents[cmd.to]
             : this.agentsOf(s, cmd.missionId).find((m) => m.role === 'planner')

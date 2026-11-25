@@ -14,10 +14,42 @@ import {
 import { useAstraState, useClient } from '../context'
 import { agentOf, agentStatus, canApprove, hhmm, personName, roleLetter, roleName } from '../select'
 
+const byTime = (a: Message, b: Message) => (a.at < b.at ? -1 : a.at > b.at ? 1 : a.id.localeCompare(b.id))
+
+/** The mission's main thread, oldest first. Side-thread messages stay out of it. */
 export function messagesOf(s: State, missionId: string): Message[] {
   return Object.values(s.messages)
-    .filter((m) => m.missionId === missionId)
-    .sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : a.id.localeCompare(b.id)))
+    .filter((m) => m.missionId === missionId && !m.side)
+    .sort(byTime)
+}
+
+/** One side thread's messages, oldest first. */
+export function sideMessagesOf(s: State, missionId: string, side: string): Message[] {
+  return Object.values(s.messages)
+    .filter((m) => m.missionId === missionId && m.side === side)
+    .sort(byTime)
+}
+
+export interface SideThread {
+  id: string
+  /** The question that opened it. */
+  title: string
+  count: number
+  at: string
+}
+
+/** The mission's side threads, newest activity first. */
+export function sideThreadsOf(s: State, missionId: string): SideThread[] {
+  const threads = new Map<string, SideThread>()
+  for (const m of Object.values(s.messages).sort(byTime)) {
+    if (m.missionId !== missionId || !m.side) continue
+    const t = threads.get(m.side)
+    if (t) {
+      t.count += 1
+      t.at = m.at
+    } else threads.set(m.side, { id: m.side, title: m.body, count: 1, at: m.at })
+  }
+  return [...threads.values()].sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0))
 }
 
 /** Ids of the latest message per agent: only those carry the agent's live status. */
@@ -92,11 +124,17 @@ export function MessageItem({
   showStatus,
   variant = 'desktop',
   last,
+  outputOpen = false,
+  dense = false,
 }: {
   message: Message
   showStatus: boolean
   variant?: ActionsVariant
   last?: boolean
+  /** Start with the agent's command output opened; it is folded by default. */
+  outputOpen?: boolean
+  /** Tighter rows for narrow panes (side chat, workbench). */
+  dense?: boolean
 }) {
   const s = useAstraState()
   const mobile = variant !== 'desktop'
@@ -134,7 +172,7 @@ export function MessageItem({
     <li
       className={cx(
         'flex [content-visibility:auto]',
-        mobile ? 'gap-3 py-3' : 'gap-4 py-4',
+        mobile || dense ? 'gap-3 py-3' : 'gap-4 py-4',
         !last && 'border-b border-line-subtle',
       )}
     >
@@ -166,7 +204,14 @@ export function MessageItem({
           </ul>
         ) : null}
         {message.log.length > 0 ? (
-          <LogWell lines={mobile ? message.log.slice(0, 1) : message.log} compact={mobile} className="mt-1" />
+          <LogWell
+            key={outputOpen ? 'open' : 'folded'}
+            lines={message.log}
+            compact={mobile || dense}
+            collapsible
+            defaultOpen={outputOpen}
+            className="mt-1"
+          />
         ) : null}
         {approval ? <ApprovalActions approval={approval} variant={variant} /> : null}
       </div>

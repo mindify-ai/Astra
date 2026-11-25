@@ -191,6 +191,7 @@ fn msgpack_roundtrip_of_ops_and_frames() {
                 mission_id: "m-1".into(),
                 to: None,
                 body: "hi".into(),
+                side: None,
             },
         },
     ));
@@ -334,5 +335,43 @@ fn generated_file_is_up_to_date() {
         normalize_ts(&on_disk) == normalize_ts(ts::PROTOCOL_TS),
         "{} is stale; run `cargo run -p astra-protocol --bin export-ts`",
         path.display()
+    );
+}
+
+#[test]
+fn a_message_written_before_side_threads_is_on_the_main_thread() {
+    let doc = fixture("ops-conformance.json");
+    let case = doc["cases"]
+        .as_array()
+        .expect("cases")
+        .iter()
+        .find(|c| {
+            c["name"]
+                .as_str()
+                .is_some_and(|n| n.starts_with("message side thread"))
+        })
+        .expect("side thread case");
+    let ops: Vec<Op> = serde_json::from_value(case["ops"].clone()).expect("ops");
+    let mut reducer = Reducer::new(State::new("ws", "me"));
+    reducer.apply_all(&ops);
+    let old = reducer
+        .state
+        .get(EntityKind::Message, "msg-old")
+        .expect("msg-old");
+    assert_eq!(old.to_json()["side"], Value::Null);
+    let side = reducer
+        .state
+        .get(EntityKind::Message, "msg-s1")
+        .expect("msg-s1");
+    assert_eq!(side.to_json()["side"], "side-1");
+    // A command written before the field decodes as a main-thread message.
+    let cmd: Command = serde_json::from_value(serde_json::json!({
+        "type": "sendMessage", "missionId": "m-1", "to": null, "body": "hi"
+    }))
+    .expect("old sendMessage");
+    assert!(matches!(cmd, Command::SendMessage { side: None, .. }));
+    assert_eq!(
+        serde_json::to_value(&cmd).expect("ser")["side"],
+        Value::Null
     );
 }

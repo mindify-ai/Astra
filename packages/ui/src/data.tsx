@@ -10,24 +10,63 @@ export interface LogLineView {
 export function LogWell({
   lines,
   compact,
+  collapsible,
+  defaultOpen = false,
+  label = 'Output',
   className,
 }: {
   lines: LogLineView[]
   compact?: boolean
+  /**
+   * Fold the output behind a summary row ("OUTPUT · 4 LINES") that people open to examine it. The latest line
+   * stays visible in the summary so the gist reads without opening it.
+   */
+  collapsible?: boolean
+  /** Start opened (collapsible only). */
+  defaultOpen?: boolean
+  /** Summary word (collapsible only). */
+  label?: string
   className?: string
 }) {
   if (lines.length === 0) return null
   const width = Math.max(...lines.map((l) => l.verb.length)) + 2
-  return (
+  const well = (extra?: string) => (
     <pre
       className={cx(
         'overflow-x-auto border border-line bg-surface-sunken font-mono text-ink-muted',
         compact ? 'px-3 py-2 text-[12px] leading-[18px]' : 'px-4 py-3 text-code',
-        className,
+        extra,
       )}
     >
       {lines.map((l) => `${l.verb.padEnd(width)}${l.target}`).join('\n')}
     </pre>
+  )
+  if (!collapsible) return well(className)
+  const last = lines[lines.length - 1]
+  return (
+    <details open={defaultOpen || undefined} className={cx('group/log', className)}>
+      <summary className="flex h-8 cursor-pointer list-none items-center gap-2 border border-line bg-surface-sunken px-3 font-mono text-spec uppercase text-ink-muted select-none hover:text-ink [&::-webkit-details-marker]:hidden">
+        <svg
+          aria-hidden="true"
+          width={12}
+          height={12}
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={1.5}
+          className="shrink-0 transition-transform group-open/log:rotate-90"
+        >
+          <path d="M9 6l6 6-6 6" />
+        </svg>
+        <span className="shrink-0">
+          {label} · {lines.length} {lines.length === 1 ? 'line' : 'lines'}
+        </span>
+        <span className="min-w-0 truncate normal-case tracking-normal group-open/log:hidden">
+          {last ? `${last.verb} ${last.target}` : null}
+        </span>
+      </summary>
+      {well('m-0 border-t-0')}
+    </details>
   )
 }
 

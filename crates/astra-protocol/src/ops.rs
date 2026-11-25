@@ -24,10 +24,13 @@ pub enum Command {
     Deny {
         approval_id: String,
     },
+    /// With `side` set, a side question: answered read-only in that side thread, never delivered to agents.
     SendMessage {
         mission_id: String,
         to: Option<String>,
         body: String,
+        #[serde(default)]
+        side: Option<String>,
     },
     TakeSteering {
         mission_agent_id: String,

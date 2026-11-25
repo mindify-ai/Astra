@@ -23,6 +23,7 @@ const msg = (id: string, body: string): Message => ({
   plan: [],
   log: [],
   approvalId: null,
+  side: null,
   at: `2026-11-21T09:0${id.length}:00Z`,
 })
 

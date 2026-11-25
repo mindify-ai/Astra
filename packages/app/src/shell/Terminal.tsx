@@ -45,10 +45,17 @@ export function WithTerminal({ children }: { children: ReactNode }) {
   }, [host.terminal, terminalOpen, setTerminalOpen])
 
   if (!host.terminal || layout === 'mobile') return <>{children}</>
+  const edge = ui.layout.terminal
   return (
-    <div className="flex h-dvh flex-col bg-surface">
-      <div className="min-h-0 grow overflow-auto">{children}</div>
-      <TerminalDock host={host.terminal} open={terminalOpen} onHide={() => setTerminalOpen(false)} />
+    <div className={cx('flex h-dvh bg-surface', edge === 'right' ? 'flex-row' : 'flex-col')}>
+      <div className="min-h-0 min-w-0 grow overflow-auto">{children}</div>
+      <TerminalDock
+        host={host.terminal}
+        open={terminalOpen}
+        edge={edge}
+        onEdge={(e) => ui.setLayout((l) => ({ ...l, terminal: e }))}
+        onHide={() => setTerminalOpen(false)}
+      />
     </div>
   )
 }
@@ -58,20 +65,38 @@ interface Tab {
   cwd: string | null
 }
 
-/** The dock may grow to 80% of the window; tracked so shrinking the window shrinks the dock with it. */
-const maxDockHeight = () => Math.round((typeof window === 'undefined' ? 900 : window.innerHeight) * 0.8)
+/**
+ * The dock may grow to 80% of the window (height at the bottom, width on the right); tracked so shrinking the
+ * window shrinks the dock with it.
+ */
+const maxDock = () => ({
+  height: Math.round((typeof window === 'undefined' ? 900 : window.innerHeight) * 0.8),
+  width: Math.round((typeof window === 'undefined' ? 1440 : window.innerWidth) * 0.8),
+})
 
-function useMaxDockHeight() {
-  const [max, setMax] = useState(maxDockHeight)
+function useMaxDock() {
+  const [max, setMax] = useState(maxDock)
   useEffect(() => {
-    const onResize = () => setMax(maxDockHeight())
+    const onResize = () => setMax(maxDock())
     window.addEventListener('resize', onResize)
     return () => window.removeEventListener('resize', onResize)
   }, [])
   return max
 }
 
-function TerminalDock({ host, open, onHide }: { host: TerminalHost; open: boolean; onHide: () => void }) {
+function TerminalDock({
+  host,
+  open,
+  edge,
+  onEdge,
+  onHide,
+}: {
+  host: TerminalHost
+  open: boolean
+  edge: 'bottom' | 'right'
+  onEdge: (edge: 'bottom' | 'right') => void
+  onHide: () => void
+}) {
   const s = useAstraState()
   const ui = useUi()
   const repo = s.repositories[ui.repoId]
@@ -79,16 +104,25 @@ function TerminalDock({ host, open, onHide }: { host: TerminalHost; open: boolea
   const [tabs, setTabs] = useState<Tab[]>([])
   const [active, setActive] = useState<number | null>(null)
   const next = useRef(1)
-  const maxHeight = useMaxDockHeight()
-  // The xterm views refit themselves through their ResizeObserver as the height changes.
-  const [height, resize] = useResizable({
+  const max = useMaxDock()
+  // The xterm views refit themselves through their ResizeObserver as the size changes.
+  const [height, resizeHeight] = useResizable({
     storageKey: 'astra.size.terminal',
     initial: 360,
     min: 120,
-    max: Math.max(120, maxHeight),
+    max: Math.max(120, max.height),
     axis: 'y',
     invert: true,
   })
+  const [width, resizeWidth] = useResizable({
+    storageKey: 'astra.size.terminal.right',
+    initial: 520,
+    min: 280,
+    max: Math.max(280, max.width),
+    axis: 'x',
+    invert: true,
+  })
+  const right = edge === 'right'
 
   const add = () => {
     const tab = { key: next.current++, cwd }
@@ -114,10 +148,13 @@ function TerminalDock({ host, open, onHide }: { host: TerminalHost; open: boolea
     <section
       aria-label="Terminal"
       hidden={!open}
-      style={{ height }}
-      className="relative flex max-h-[80dvh] shrink-0 flex-col border-t border-line-strong bg-surface"
+      style={right ? { width } : { height }}
+      className={cx(
+        'relative flex shrink-0 flex-col bg-surface',
+        right ? 'max-w-[80dvw] border-l border-line-strong' : 'max-h-[80dvh] border-t border-line-strong',
+      )}
     >
-      <ResizeHandle {...resize} label="Resize terminal" />
+      <ResizeHandle {...(right ? resizeWidth : resizeHeight)} label="Resize terminal" />
       <div className="flex h-9 shrink-0 items-center gap-1 border-b border-line px-3">
         <Eyebrow as="h2" className="mr-3">
           Terminal
@@ -161,6 +198,14 @@ function TerminalDock({ host, open, onHide }: { host: TerminalHost; open: boolea
           </button>
         </div>
         <div className="grow" />
+        <button
+          type="button"
+          className={buttonClass('text', 'sm')}
+          title={right ? 'Dock the terminal at the bottom' : 'Dock the terminal on the right'}
+          onClick={() => onEdge(right ? 'bottom' : 'right')}
+        >
+          {right ? 'DOCK BOTTOM' : 'DOCK RIGHT'}
+        </button>
         <button type="button" className={buttonClass('text', 'sm')} onClick={onHide}>
           HIDE
         </button>

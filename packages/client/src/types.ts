@@ -130,6 +130,8 @@ export interface Message {
   plan: PlanStep[]
   log: LogLine[]
   approvalId: Id | null
+  /** The side thread this message belongs to (`side-<ulid>`); null is the mission's main thread. */
+  side: Id | null
   at: Timestamp
 }
 
@@ -257,7 +259,7 @@ export type Command =
   | { type: 'startMission'; missionId: Id }
   | { type: 'approve'; approvalId: Id }
   | { type: 'deny'; approvalId: Id }
-  | { type: 'sendMessage'; missionId: Id; to: Id | null; body: string }
+  | { type: 'sendMessage'; missionId: Id; to: Id | null; body: string; side: Id | null }
   | { type: 'takeSteering'; missionAgentId: Id }
   | { type: 'releaseSteering'; missionAgentId: Id }
   | { type: 'pause'; missionAgentId: Id }
