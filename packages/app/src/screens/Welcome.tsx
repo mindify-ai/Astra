@@ -4,8 +4,8 @@ import { useHost } from '../context'
 import { AppHeader, Page } from '../shell/AppHeader'
 
 /**
- * 1 · Welcome. In the desktop app, before it has signed in to a sync server, GitHub and GitLab start sign-in;
- * otherwise (signed in, or the web app, which signs in before it opens) they go on to choosing a repository.
+ * 1 · Welcome. In the desktop app, before it has signed in to a sync server, GitHub starts sign-in (GitLab is
+ * hidden for now); otherwise (signed in, or the web app, which signs in before it opens) they go on to choosing a repository.
  */
 export function Welcome() {
   const { account } = useHost()
@@ -32,17 +32,11 @@ export function Welcome() {
                 <Link to="/signin" search={{ provider: 'github' }} className={buttonClass('primary', 'lg')}>
                   Continue with GitHub →
                 </Link>
-                <Link to="/signin" search={{ provider: 'gitlab' }} className={buttonClass('outline', 'lg')}>
-                  Continue with GitLab
-                </Link>
               </>
             ) : (
               <>
                 <Link to="/setup/repo" search={{ source: 'github' }} className={buttonClass('primary', 'lg')}>
                   Continue with GitHub →
-                </Link>
-                <Link to="/setup/repo" search={{ source: 'gitlab' }} className={buttonClass('outline', 'lg')}>
-                  Continue with GitLab
                 </Link>
               </>
             )}

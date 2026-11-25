@@ -699,3 +699,65 @@ async fn pushed_ops_cannot_claim_someone_else() {
     );
     let _ = s.shutdown.send(true);
 }
+
+#[tokio::test]
+async fn github_oauth_app_misconfiguration_is_reported() {
+    use wiremock::matchers::{body_string_contains, method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+    let gh = MockServer::start().await;
+    // What github.com answers for a client id it does not know (checked against the real endpoint).
+    Mock::given(method("POST"))
+        .and(path("/login/device/code"))
+        .and(body_string_contains("client_id=unknown"))
+        .respond_with(ResponseTemplate::new(404).set_body_json(json!({"error": "Not Found"})))
+        .mount(&gh)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/login/device/code"))
+        .and(body_string_contains("client_id=no-device-flow"))
+        .respond_with(
+            ResponseTemplate::new(400).set_body_json(json!({"error": "device_flow_disabled"})),
+        )
+        .mount(&gh)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/login/oauth/access_token"))
+        .and(body_string_contains("device_code=bogus"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"error": "incorrect_device_code"})),
+        )
+        .mount(&gh)
+        .await;
+    let http = reqwest::Client::new();
+    for (client_id, status, body) in [
+        ("unknown", 503, json!({"error": "badClientId"})),
+        ("no-device-flow", 503, json!({"error": "deviceFlowDisabled"})),
+    ] {
+        let mut config = dev_config();
+        config.providers.github_client_id = Some(client_id.into());
+        config.providers.github_oauth_base = gh.uri();
+        config.providers.github_api_base = gh.uri();
+        let s = start(config).await;
+        let r = http
+            .post(format!("{}/v1/auth/device/start", s.http))
+            .json(&json!({"provider": "github"}))
+            .send()
+            .await
+            .expect("start");
+        assert_eq!(r.status(), status, "{client_id}");
+        assert_eq!(r.json::<Value>().await.expect("json"), body, "{client_id}");
+        if client_id == "no-device-flow" {
+            // A device code GitHub does not recognise: start again, as for an expired one.
+            let poll: Value = http
+                .post(format!("{}/v1/auth/device/poll", s.http))
+                .json(&json!({"provider": "github", "deviceCode": "bogus"}))
+                .send()
+                .await
+                .expect("poll")
+                .json()
+                .await
+                .expect("json");
+            assert_eq!(poll, json!({"status": "expired"}));
+        }
+    }
+}

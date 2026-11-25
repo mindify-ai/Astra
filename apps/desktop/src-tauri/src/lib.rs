@@ -459,6 +459,7 @@ pub fn run() {
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_opener::init())
         .manage(terminal::Terminals::default())
         .setup(|app| {
             let root = app.path().app_data_dir()?;

@@ -24,6 +24,10 @@ function explain(e: unknown, provider: Provider | null): string {
   switch (e.code) {
     case 'notConfigured':
       return `Sign-in with ${name} is not set up on this server yet.`
+    case 'deviceFlowDisabled':
+      return `Sign-in with ${name} is turned off on this server: its ${name} OAuth app needs device flow enabled.`
+    case 'badClientId':
+      return `This server's ${name} OAuth app is not set up correctly: ${name} does not know its client ID.`
     case 'network':
       return 'Astra could not reach its server. Check your connection and try again.'
     case 'expired':
@@ -42,14 +46,16 @@ export interface SignInProps {
   auth: Auth
   /** May return a promise (the desktop app saves the session); a rejection shows as an error. */
   onSignedIn: (session: Session) => void | Promise<void>
-  /** Providers offered, in order. The first is the primary button. */
+  /** Providers offered, in order. The first is the primary button. GitHub only for now; the relay also speaks GitLab. */
   providers?: Provider[]
   /** Where "Get the desktop app" points; local folders need the desktop app. */
   desktopUrl?: string
   /** Show the developer-token form (local relay with ASTRA_DEV_AUTH=1). */
   devAuth?: boolean
-  /** Opens the provider's page; injectable for tests. */
+  /** Opens the provider's page; injectable for tests and for the desktop app's browser opener. */
   openUrl?: (url: string) => void
+  /** Copies the code; defaults to the browser clipboard. */
+  copyText?: (text: string) => Promise<void>
   /** An editable sync server address (the desktop app, which can sign in to any relay). */
   server?: { value: string; onChange: (value: string) => void; valid?: boolean }
   /** Starts this provider's device flow right away (arriving from "Continue with GitHub"). */
@@ -67,10 +73,11 @@ export interface SignInProps {
 export function SignIn({
   auth,
   onSignedIn,
-  providers = ['github', 'gitlab'],
+  providers = ['github'],
   desktopUrl = 'https://github.com/mindify-ai/Astra/releases/latest',
   devAuth = false,
   openUrl = (url) => window.open(url, '_blank', 'noopener,noreferrer'),
+  copyText = (text) => navigator.clipboard.writeText(text),
   server,
   autoStart,
   localAction,
@@ -118,7 +125,7 @@ export function SignIn({
 
   const copy = async (text: string) => {
     try {
-      await navigator.clipboard.writeText(text)
+      await copyText(text)
       setCopied(true)
     } catch {
       setCopied(false)
@@ -303,6 +310,9 @@ function DeviceStep({
           Open {name} and enter this code to let Astra see your name and email. Astra never sees your {name}{' '}
           password.
         </p>
+        <Spec as="p" className="m-0 break-all normal-case tracking-normal">
+          {code.verificationUri}
+        </Spec>
       </div>
       <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
         <output aria-label="Your code" className="font-mono text-metric-sm tracking-[0.12em] tabular-nums">

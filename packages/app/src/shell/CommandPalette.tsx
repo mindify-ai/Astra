@@ -190,7 +190,7 @@ export function CommandPalette() {
         id: 'signin',
         group: 'Actions',
         label: 'Sign in to sync',
-        keywords: 'github gitlab account relay server team',
+        keywords: 'github account relay server team',
         run: () => void navigate({ to: '/signin', search: { provider: 'github' } }),
       })
     if (host.signOut) out.push({ id: 'signout', group: 'Actions', label: 'Sign out', run: host.signOut })

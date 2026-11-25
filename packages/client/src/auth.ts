@@ -31,6 +31,10 @@ export type PollResult =
 
 export type AuthErrorCode =
   | 'notConfigured'
+  /** The server's OAuth app has no device flow enabled (GitHub: "Enable Device Flow"). */
+  | 'deviceFlowDisabled'
+  /** The server's OAuth client id is unknown to the provider. */
+  | 'badClientId'
   | 'badProvider'
   | 'network'
   | 'server'
@@ -94,6 +98,8 @@ export class RelayAuth implements Auth {
     }
     const json = (await res.json().catch(() => ({}))) as { error?: string }
     if (res.status === 503 && json.error === 'notConfigured') throw new AuthError('notConfigured')
+    if (res.status === 503 && json.error === 'deviceFlowDisabled') throw new AuthError('deviceFlowDisabled')
+    if (res.status === 503 && json.error === 'badClientId') throw new AuthError('badClientId')
     if (res.status === 400 && json.error === 'badProvider') throw new AuthError('badProvider')
     if (!res.ok) throw new AuthError('server', `The sync server answered ${res.status}.`)
     return json as T

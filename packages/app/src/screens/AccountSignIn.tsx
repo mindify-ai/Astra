@@ -18,7 +18,7 @@ const noServer: Auth = {
  * keeps the local workspace. Without the capability (web, tests) it goes on to choosing a repository.
  */
 export function AccountSignIn({ provider }: { provider?: Provider }) {
-  const { account } = useHost()
+  const { account, openUrl, copy } = useHost()
   const [server, setServer] = useState(account?.server ?? '')
   const base = serverBaseUrl(server)
   const auth = useMemo(() => (account && base ? account.auth(base) : null), [account, base])
@@ -28,6 +28,8 @@ export function AccountSignIn({ provider }: { provider?: Provider }) {
       auth={auth ?? noServer}
       server={{ value: server, onChange: setServer, valid: base !== null }}
       autoStart={base ? provider : undefined}
+      openUrl={openUrl}
+      copyText={copy}
       onSignedIn={(session) => (base ? account.signIn(base, session) : Promise.resolve())}
       header={<AppHeader border={false} byline="BY MINDIFY AI" />}
       localAction={

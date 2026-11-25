@@ -59,8 +59,8 @@ const welcomeRoute = createRoute({ getParentRoute: () => rootRoute, path: '/welc
 const signInRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/signin',
-  validateSearch: (search: Record<string, unknown>): { provider?: 'github' | 'gitlab' } =>
-    search.provider === 'github' || search.provider === 'gitlab' ? { provider: search.provider } : {},
+  validateSearch: (search: Record<string, unknown>): { provider?: 'github' } =>
+    search.provider === 'github' ? { provider: search.provider } : {},
   component: function SignInRoute() {
     const { provider } = signInRoute.useSearch()
     return <AccountSignIn provider={provider} />

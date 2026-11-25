@@ -441,6 +441,25 @@ pub struct DevicePollRequest {
     pub device_code: String,
 }
 
+/// A provider answer that means the server's OAuth app is set up wrong, not that sign-in failed: an unknown client
+/// id (GitHub answers 404 `Not Found`), or an app without device flow enabled. These are `503`s with a code the
+/// sign-in screen explains, and they are logged for whoever runs the relay.
+fn misconfigured(status: u16, v: &Value) -> Option<Response> {
+    let code = v["error"].as_str().unwrap_or_default();
+    let reply = match code {
+        "device_flow_disabled" => "deviceFlowDisabled",
+        "incorrect_client_credentials" | "unauthorized_client" | "invalid_client" => "badClientId",
+        _ if status == 404 => "badClientId",
+        _ => return None,
+    };
+    tracing::error!(
+        status,
+        error = code,
+        "the OAuth app is misconfigured: check GITHUB_CLIENT_ID and that device flow is enabled"
+    );
+    Some(error(StatusCode::SERVICE_UNAVAILABLE, reply))
+}
+
 async fn send_json(http: &reqwest::Client, req: reqwest::Request) -> Result<(u16, Value), String> {
     let resp = http
         .execute(req)
@@ -480,10 +499,10 @@ pub async fn device_start(
             "expiresIn": v["expires_in"].as_u64().unwrap_or(900),
         }))
         .into_response(),
-        Ok((status, v)) => {
+        Ok((status, v)) => misconfigured(status, &v).unwrap_or_else(|| {
             tracing::warn!(status, error = %v["error"], "device start failed");
             error(StatusCode::BAD_GATEWAY, "providerError")
-        }
+        }),
         Err(e) => {
             tracing::warn!(error = %e, "device start failed");
             error(StatusCode::BAD_GATEWAY, "providerError")
@@ -508,7 +527,12 @@ pub async fn device_poll(
         Err(_) => return error(StatusCode::INTERNAL_SERVER_ERROR, "internal"),
     };
     let v = match send_json(&state.http, r).await {
-        Ok((_, v)) => v,
+        Ok((status, v)) => {
+            if let Some(reply) = misconfigured(status, &v) {
+                return reply;
+            }
+            v
+        }
         Err(e) => {
             tracing::warn!(error = %e, "device poll failed");
             return error(StatusCode::BAD_GATEWAY, "providerError");
@@ -520,7 +544,8 @@ pub async fn device_poll(
             "slow_down" => {
                 json!({"status": "slowDown", "interval": v["interval"].as_u64().unwrap_or(10)})
             }
-            "expired_token" => json!({"status": "expired"}),
+            // An unknown device code: start again, as for an expired one.
+            "expired_token" | "incorrect_device_code" => json!({"status": "expired"}),
             "access_denied" => json!({"status": "denied"}),
             other => {
                 tracing::warn!(error = other, "device poll error");

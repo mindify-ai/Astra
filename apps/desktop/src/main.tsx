@@ -10,6 +10,7 @@ import {
 } from '@astra/client'
 import { writeText } from '@tauri-apps/plugin-clipboard-manager'
 import { open } from '@tauri-apps/plugin-dialog'
+import { openUrl } from '@tauri-apps/plugin-opener'
 import { platform as osPlatform } from '@tauri-apps/plugin-os'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
@@ -78,6 +79,7 @@ function startNode() {
                 return typeof picked === 'string' ? picked : null
               },
               copy: (text) => writeText(text),
+              openUrl: (url) => void openUrl(url),
               account,
               signOut: signedIn ? () => void TauriClient.signOut() : undefined,
               terminal: desktop ? tauriTerminal : undefined,
