@@ -88,8 +88,12 @@ it on GitHub, and no password or GitHub token ever reaches the browser.
   with **Enable Device Flow** ticked. No client secret or callback URL is used. With Terraform this is
   `github_oauth_client_id`. If either is wrong, sign-in says so and the relay logs it.
 - Add `?signin` to the demo URL to try the sign-in screen without a relay.
-- The desktop app signs in the same way from Welcome's _Continue with GitHub_. It offers the relay in
-  `VITE_ASTRA_RELAY_URL` at build time, and you can type another. _Open GitHub_ opens your default browser.
+- The desktop app signs in from Welcome's _Continue with GitHub_. With no sync server it talks to GitHub itself,
+  with the OAuth app client id built into `apps/desktop/src-tauri/src/github.rs` (override at build time with
+  `ASTRA_GITHUB_CLIENT_ID`; that app needs **Enable Device Flow** too). No client secret is used or shipped. Then
+  the Repo screen lists your GitHub repositories and clones one into `~/Astra` in one click. With a sync server
+  address (default from `VITE_ASTRA_RELAY_URL` at build time) it signs in through the relay instead. _Open
+  GitHub_ opens your default browser.
 
 ## Layout
 

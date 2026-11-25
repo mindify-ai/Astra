@@ -67,7 +67,11 @@ pub fn parse_start(status: u16, v: &Value) -> Result<DeviceCode, &'static str> {
         return Err(code);
     }
     let text = |k: &str| v[k].as_str().map(str::to_string);
-    match (text("device_code"), text("user_code"), text("verification_uri")) {
+    match (
+        text("device_code"),
+        text("user_code"),
+        text("verification_uri"),
+    ) {
         (Some(device_code), Some(user_code), Some(verification_uri)) if status == 200 => {
             Ok(DeviceCode {
                 device_code,
@@ -159,11 +163,14 @@ pub async fn start() -> Result<DeviceCode, &'static str> {
 /// Polls once; on approval, reads the profile and returns it with the token.
 pub async fn poll(device_code: &str) -> Result<Result<(Profile, String), Poll>, &'static str> {
     let http = client()?;
-    let (status, v) = send(http.post(format!("{OAUTH_BASE}/login/oauth/access_token")).form(&[
-        ("client_id", CLIENT_ID),
-        ("device_code", device_code),
-        ("grant_type", DEVICE_GRANT),
-    ]))
+    let (status, v) = send(
+        http.post(format!("{OAUTH_BASE}/login/oauth/access_token"))
+            .form(&[
+                ("client_id", CLIENT_ID),
+                ("device_code", device_code),
+                ("grant_type", DEVICE_GRANT),
+            ]),
+    )
     .await?;
     let token = match parse_poll(status, &v)? {
         Poll::Token(t) => t,
@@ -253,7 +260,11 @@ pub fn base64(bytes: &[u8]) -> String {
     const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
     for chunk in bytes.chunks(3) {
-        let b = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
+        let b = [
+            chunk[0],
+            *chunk.get(1).unwrap_or(&0),
+            *chunk.get(2).unwrap_or(&0),
+        ];
         let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
         for i in 0..4 {
             if i <= chunk.len() {
@@ -414,7 +425,16 @@ mod tests {
     fn clone_names_and_auth_header() {
         assert!(valid_full_name("octocat/Hello-World"));
         assert!(valid_full_name("mindify-ai/astra.web"));
-        for bad in ["octocat", "a/b/c", "../x", "-x/y", "x/--upload-pack=evil", "x/.git", "x y/z", ""] {
+        for bad in [
+            "octocat",
+            "a/b/c",
+            "../x",
+            "-x/y",
+            "x/--upload-pack=evil",
+            "x/.git",
+            "x y/z",
+            "",
+        ] {
             assert!(!valid_full_name(bad), "{bad}");
         }
         assert_eq!(base64(b""), "");

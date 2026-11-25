@@ -95,8 +95,10 @@ Terraform (in `infra/gcp`): `terraform fmt -check -recursive && terraform init -
    - Fonts are self-hosted (no CDN links).
    - New network calls belong in `packages/client`, with failure handled.
    - The UI shows `OFFLINE` from `useConnectivity()`.
-9. **Keys never leave runner nodes.** Never send secrets to the relay or the web app. Never store provider
-   OAuth tokens: the relay uses them once to read the profile, and the browser only ever holds Astra's JWT.
+9. **Keys never leave runner nodes.** Never send secrets to the relay or the web app. The relay never stores
+   provider OAuth tokens: it uses them once to read the profile, and the browser only ever holds Astra's JWT.
+   The one stored provider token is the desktop app's own GitHub sign-in (`apps/desktop/src-tauri/src/github.rs`),
+   kept in the OS keychain only, to list and clone repositories. Never ship an OAuth client secret in an app.
 10. **Relay limits.** Fan-out is in-process, so `relay_max_instances` stays at 1 until NATS lands. The relay
     must keep the runtime contract the Terraform expects:
     - `PORT`, `DATABASE_URL`, `ASTRA_JWT_SECRET`, `ASTRA_ALLOWED_ORIGINS`, `ASTRA_LOG_FORMAT=json`;
@@ -111,7 +113,7 @@ Terraform (in `infra/gcp`): `terraform fmt -check -recursive && terraform init -
 1. Build it in `packages/app/src/screens/X.tsx` from `@astra/ui` primitives.
 2. Add the route in `router.tsx`, plus a phone variant in `mobile/` if needed.
 3. Add a test in `packages/app/test/` that mounts `<AstraApp client={new MockClient({ seed: demoSeed, latency: 0 })}
-   platform=… history={{ memory: '/path' }} />`.
+platform=… history={{ memory: '/path' }} />`.
 4. Screenshot it.
 
 **New command.**

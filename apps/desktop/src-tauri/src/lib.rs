@@ -149,8 +149,14 @@ async fn github_device_poll(
         initials: initials(&profile.name),
         name: profile.name.clone(),
     };
-    let op = state.node.make_op(me, astra_protocol::OpBody::put(person.clone()));
-    state.node.apply(vec![op]).await.map_err(|e| e.to_string())?;
+    let op = state
+        .node
+        .make_op(me, astra_protocol::OpBody::put(person.clone()));
+    state
+        .node
+        .apply(vec![op])
+        .await
+        .map_err(|e| e.to_string())?;
     // Kept for listing and cloning your repositories; the keychain only.
     github_token::set(&token)?;
     drop(token);
@@ -197,7 +203,11 @@ async fn github_clone(full_name: String, parent: Option<String>) -> Result<Strin
         Some(p) => PathBuf::from(p),
         None => default_clone_parent()?,
     };
-    let name = full_name.rsplit('/').next().unwrap_or(&full_name).to_string();
+    let name = full_name
+        .rsplit('/')
+        .next()
+        .unwrap_or(&full_name)
+        .to_string();
     let dest = parent.join(&name);
     tauri::async_runtime::spawn_blocking(move || {
         if dest.exists() {

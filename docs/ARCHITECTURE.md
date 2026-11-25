@@ -41,16 +41,20 @@ It works remotely or fully locally, with or without internet.
 | **Local**       | The desktop alone: agents, git, data. No account.         | No (with local models)         |
 | **Connected**   | Desktop runner + relay, so phone, web and teammates join. | For remote clients             |
 | **Your server** | `astrad` on a box you own runs agents; any client steers. | Between clients and the server |
+| **LAN**         | Phone pairs directly with the desktop by QR code.         | No                             |
 
 **Attaching a runner node.** Every runner node puts a `node` entity when it starts. On the Connect screen, _Runs
 on_ lists them (this machine first), and picking one attaches the agent there: its commands go to that node, which
 connects the agent with its own keys. A mission runs on the node of its first enabled agent. To add a server, run
 `astrad` there signed in to the workspace's relay (see the README).
 
-**Desktop sign-in.** _Continue with GitHub_ on Welcome (or _Sign in to sync_) runs the relay's device flow from
-the desktop app, then restarts the node on that workspace in its own store. _Use this machine only_ keeps the
-local workspace.
-| **LAN** | Phone pairs directly with the desktop by QR code. | No |
+**Desktop sign-in.** _Continue with GitHub_ on Welcome (or _Sign in to sync_) has two routes:
+
+- **No sync server** (the default): the app runs GitHub's device flow itself, with its built-in OAuth client id
+  (public; no client secret is used or shipped). You take your GitHub name in the local workspace, and GitHub's
+  token goes to the OS keychain so the Repo screen can list your repositories and clone one into `~/Astra` in one
+  click. The token is passed to `git` through environment config only, never written to the clone or synced.
+- **A sync server address**: the relay's device flow, then the node restarts on that workspace in its own store.
 
 ## Repository
 
@@ -129,7 +133,8 @@ local workspace.
 
 ## Security
 
-- **Keys.** Keys stay in the OS keychain on runner nodes, and nothing secret is synced.
+- **Keys.** Keys stay in the OS keychain on runner nodes, and nothing secret is synced. That includes the desktop
+  app's GitHub token (scopes `repo read:user`), used only to list and clone your repositories.
 - **Agent sandboxing.** Agent file access is confined to its worktree, and commands follow the approval policy.
 - **Tauri.** The webview's capabilities are limited to window controls, the OS info read, the folder picker,
   clipboard writes and opening `https://github.com/*` pages in the default browser (for sign-in). Files, processes and the network go through the Rust core.
