@@ -2,8 +2,8 @@
 //! app's public client id built in. The device flow needs no client secret, and none is shipped: anything in
 //! the bundle can be read by whoever downloads it.
 //!
-//! GitHub's access token is used once, to read the profile (name and login), and then dropped. It is never
-//! stored, synced or handed to the webview.
+//! GitHub's access token reads the profile (name and login), lists your repositories and clones them. On the
+//! desktop it is kept in the OS keychain only: never in settings, never synced, never handed to the webview.
 
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -17,8 +17,8 @@ pub const CLIENT_ID: &str = match option_env!("ASTRA_GITHUB_CLIENT_ID") {
 const OAUTH_BASE: &str = "https://github.com";
 const API_BASE: &str = "https://api.github.com";
 const DEVICE_GRANT: &str = "urn:ietf:params:oauth:grant-type:device_code";
-/// Only the public profile: the name and login become your name in Astra.
-const SCOPE: &str = "read:user";
+/// The profile (your name in Astra) and your repositories, private ones included, to list and clone them.
+const SCOPE: &str = "repo read:user";
 
 /// `@astra/client` `DeviceCode`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -156,8 +156,8 @@ pub async fn start() -> Result<DeviceCode, &'static str> {
     parse_start(status, &v)
 }
 
-/// Polls once; on approval, reads the profile with the token and drops the token.
-pub async fn poll(device_code: &str) -> Result<Result<Profile, Poll>, &'static str> {
+/// Polls once; on approval, reads the profile and returns it with the token.
+pub async fn poll(device_code: &str) -> Result<Result<(Profile, String), Poll>, &'static str> {
     let http = client()?;
     let (status, v) = send(http.post(format!("{OAUTH_BASE}/login/oauth/access_token")).form(&[
         ("client_id", CLIENT_ID),
@@ -169,10 +169,140 @@ pub async fn poll(device_code: &str) -> Result<Result<Profile, Poll>, &'static s
         Poll::Token(t) => t,
         other => return Ok(Err(other)),
     };
-    let user = send(http.get(format!("{API_BASE}/user")).bearer_auth(&token)).await;
-    drop(token);
-    let (status, v) = user?;
-    parse_profile(status, &v).map(Ok)
+    let (status, v) = send(http.get(format!("{API_BASE}/user")).bearer_auth(&token)).await?;
+    parse_profile(status, &v).map(|p| Ok((p, token)))
+}
+
+/// One of your repositories (`@astra/client` `GithubRepo`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Repo {
+    pub full_name: String,
+    pub name: String,
+    pub owner: String,
+    pub private: bool,
+    pub default_branch: String,
+    pub clone_url: String,
+    pub description: Option<String>,
+    pub updated_at: Option<String>,
+}
+
+/// Reads one page of `/user/repos`. `signedOut` when GitHub no longer accepts the token.
+pub fn parse_repos(status: u16, v: &Value) -> Result<Vec<Repo>, &'static str> {
+    match status {
+        200 => {}
+        401 => return Err("signedOut"),
+        _ => return Err("server"),
+    }
+    let text = |r: &Value, k: &str| r[k].as_str().map(str::to_string);
+    Ok(v.as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|r| {
+            Some(Repo {
+                full_name: text(r, "full_name")?,
+                name: text(r, "name")?,
+                owner: text(&r["owner"], "login")?,
+                private: r["private"].as_bool().unwrap_or(false),
+                default_branch: text(r, "default_branch").unwrap_or_else(|| "main".into()),
+                clone_url: text(r, "clone_url")?,
+                description: text(r, "description"),
+                updated_at: text(r, "pushed_at").or_else(|| text(r, "updated_at")),
+            })
+        })
+        .collect())
+}
+
+/// Your repositories (owned, collaborator and organization), most recently pushed first; up to 500.
+pub async fn repos(token: &str) -> Result<Vec<Repo>, &'static str> {
+    let http = client()?;
+    let mut out = Vec::new();
+    for page in 1..=5 {
+        let (status, v) = send(
+            http.get(format!(
+                "{API_BASE}/user/repos?per_page=100&sort=pushed&page={page}"
+            ))
+            .bearer_auth(token),
+        )
+        .await?;
+        let batch = parse_repos(status, &v)?;
+        let done = batch.len() < 100;
+        out.extend(batch);
+        if done {
+            break;
+        }
+    }
+    Ok(out)
+}
+
+/// `owner/name`, as GitHub allows them; anything else could smuggle a path or a flag into `git clone`.
+pub fn valid_full_name(full_name: &str) -> bool {
+    let ok = |part: &str| {
+        !part.is_empty()
+            && !part.starts_with('.')
+            && !part.starts_with('-')
+            && part
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+    };
+    matches!(full_name.split_once('/'), Some((owner, name)) if ok(owner) && ok(name))
+}
+
+/// Standard base64 (for git's basic-auth header).
+pub fn base64(bytes: &[u8]) -> String {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let b = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
+        let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
+        for i in 0..4 {
+            if i <= chunk.len() {
+                out.push(T[(n >> (18 - 6 * i)) as usize & 63] as char);
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
+}
+
+/// `git clone` of `https://github.com/<full_name>.git` into `dest`. The token reaches git through environment
+/// config only (`GIT_CONFIG_*`), so it is not in the process arguments and is not written to the clone's
+/// `.git/config`; the clone's `origin` is the plain https URL.
+pub fn clone(token: &str, full_name: &str, dest: &std::path::Path) -> Result<(), String> {
+    if !valid_full_name(full_name) {
+        return Err(format!("not a GitHub repository: {full_name}"));
+    }
+    let header = format!(
+        "AUTHORIZATION: basic {}",
+        base64(format!("x-access-token:{token}").as_bytes())
+    );
+    let out = std::process::Command::new("git")
+        .arg("clone")
+        .arg("--")
+        .arg(format!("https://github.com/{full_name}.git"))
+        .arg(dest)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GIT_CONFIG_COUNT", "1")
+        .env("GIT_CONFIG_KEY_0", "http.https://github.com/.extraheader")
+        .env("GIT_CONFIG_VALUE_0", header)
+        .output()
+        .map_err(|e| match e.kind() {
+            std::io::ErrorKind::NotFound => {
+                "Git is not installed. Install it (xcode-select --install), then try again.".into()
+            }
+            _ => e.to_string(),
+        })?;
+    if out.status.success() {
+        return Ok(());
+    }
+    let err = String::from_utf8_lossy(&out.stderr);
+    let last = err
+        .lines()
+        .rev()
+        .find(|l| !l.trim().is_empty())
+        .unwrap_or("git clone failed");
+    Err(last.trim().trim_start_matches("fatal: ").to_string())
 }
 
 #[cfg(test)]
@@ -254,6 +384,44 @@ mod tests {
             })
         );
         assert_eq!(parse_profile(401, &Value::Null), Err("server"));
+    }
+
+    #[test]
+    fn repositories() {
+        let page = json!([
+            {"full_name": "octocat/hello", "name": "hello", "owner": {"login": "octocat"}, "private": true,
+             "default_branch": "trunk", "clone_url": "https://github.com/octocat/hello.git",
+             "description": null, "pushed_at": "2026-11-20T10:00:00Z"},
+            {"name": "broken"}
+        ]);
+        assert_eq!(
+            parse_repos(200, &page),
+            Ok(vec![Repo {
+                full_name: "octocat/hello".into(),
+                name: "hello".into(),
+                owner: "octocat".into(),
+                private: true,
+                default_branch: "trunk".into(),
+                clone_url: "https://github.com/octocat/hello.git".into(),
+                description: None,
+                updated_at: Some("2026-11-20T10:00:00Z".into()),
+            }])
+        );
+        assert_eq!(parse_repos(401, &Value::Null), Err("signedOut"));
+    }
+
+    #[test]
+    fn clone_names_and_auth_header() {
+        assert!(valid_full_name("octocat/Hello-World"));
+        assert!(valid_full_name("mindify-ai/astra.web"));
+        for bad in ["octocat", "a/b/c", "../x", "-x/y", "x/--upload-pack=evil", "x/.git", "x y/z", ""] {
+            assert!(!valid_full_name(bad), "{bad}");
+        }
+        assert_eq!(base64(b""), "");
+        assert_eq!(base64(b"f"), "Zg==");
+        assert_eq!(base64(b"fo"), "Zm8=");
+        assert_eq!(base64(b"foo"), "Zm9v");
+        assert_eq!(base64(b"x-access-token:abc"), "eC1hY2Nlc3MtdG9rZW46YWJj");
     }
 
     #[test]

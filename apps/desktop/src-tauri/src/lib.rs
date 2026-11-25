@@ -132,15 +132,15 @@ async fn github_device_start() -> Result<github::DeviceCode, String> {
 }
 
 /// Polls GitHub once. On approval, you take your GitHub name in this workspace (the `person` entity you sign
-/// as), it is remembered in the settings, and a `complete` poll result is returned whose session has no
-/// token: there is no server session, and GitHub's own token has already been dropped.
+/// as), GitHub's token goes to the OS keychain, the login is remembered in the settings, and a `complete` poll
+/// result is returned whose session has no token: there is no server session, and GitHub's token stays here.
 #[tauri::command]
 async fn github_device_poll(
     state: State<'_, AppState>,
     device_code: String,
 ) -> Result<serde_json::Value, String> {
-    let profile = match github::poll(&device_code).await.map_err(str::to_string)? {
-        Ok(profile) => profile,
+    let (profile, token) = match github::poll(&device_code).await.map_err(str::to_string)? {
+        Ok(done) => done,
         Err(unfinished) => return Ok(github::poll_json(&unfinished)),
     };
     let me = state.info.me.clone();
@@ -151,6 +151,9 @@ async fn github_device_poll(
     };
     let op = state.node.make_op(me, astra_protocol::OpBody::put(person.clone()));
     state.node.apply(vec![op]).await.map_err(|e| e.to_string())?;
+    // Kept for listing and cloning your repositories; the keychain only.
+    github_token::set(&token)?;
+    drop(token);
     let mut settings = read_settings(&state.root);
     settings.github = Some(GithubIdentity {
         login: profile.login,
@@ -166,6 +169,123 @@ async fn github_device_poll(
             "expiresAt": "",
         },
     }))
+}
+
+/// Your GitHub repositories, most recently pushed first. `signedOut` when there is no token or GitHub no
+/// longer accepts it (the stale token is then forgotten).
+#[tauri::command]
+async fn github_repos() -> Result<Vec<github::Repo>, String> {
+    let token = github_token::get().ok_or("signedOut")?;
+    match github::repos(&token).await {
+        Err("signedOut") => {
+            let _ = github_token::delete();
+            Err("signedOut".into())
+        }
+        other => other.map_err(str::to_string),
+    }
+}
+
+/// Clones `owner/name` into `<parent>/<name>` (default parent: `~/Astra`) and returns the folder. A folder
+/// that already holds that repository is returned as it is.
+#[tauri::command]
+async fn github_clone(full_name: String, parent: Option<String>) -> Result<String, String> {
+    if !github::valid_full_name(&full_name) {
+        return Err(format!("not a GitHub repository: {full_name}"));
+    }
+    let token = github_token::get().ok_or("signedOut")?;
+    let parent = match parent.filter(|p| !p.trim().is_empty()) {
+        Some(p) => PathBuf::from(p),
+        None => default_clone_parent()?,
+    };
+    let name = full_name.rsplit('/').next().unwrap_or(&full_name).to_string();
+    let dest = parent.join(&name);
+    tauri::async_runtime::spawn_blocking(move || {
+        if dest.exists() {
+            return if same_origin(&dest, &full_name) {
+                Ok(dest.to_string_lossy().into_owned())
+            } else {
+                Err(format!(
+                    "{} already exists. Pick another folder to clone into.",
+                    dest.display()
+                ))
+            };
+        }
+        std::fs::create_dir_all(&parent).map_err(|e| e.to_string())?;
+        github::clone(&token, &full_name, &dest)?;
+        Ok(dest.to_string_lossy().into_owned())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Forgets the GitHub account: its token leaves the keychain. Your name in the workspace stays.
+#[tauri::command]
+fn github_sign_out(state: State<'_, AppState>) -> Result<(), String> {
+    github_token::delete()?;
+    let mut settings = read_settings(&state.root);
+    settings.github = None;
+    write_settings(&state.root, &settings).map_err(|e| e.to_string())
+}
+
+/// `~/Astra`, where clones go unless you pick another folder.
+fn default_clone_parent() -> Result<PathBuf, String> {
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(|home| PathBuf::from(home).join("Astra"))
+        .ok_or_else(|| "no home folder".into())
+}
+
+/// Whether `dir` is a clone of `github.com/<full_name>` (its `origin`, with or without `.git`).
+fn same_origin(dir: &Path, full_name: &str) -> bool {
+    std::process::Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(["remote", "get-url", "origin"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_lowercase())
+        .is_some_and(|url| {
+            let want = format!("github.com/{}", full_name.to_lowercase());
+            url.trim_end_matches(".git").ends_with(&want)
+        })
+}
+
+/// GitHub's token in the OS keychain (desktop). Phones don't clone, so they keep none.
+mod github_token {
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    fn entry() -> Result<keyring::Entry, String> {
+        keyring::Entry::new("ai.mindify.astra", "github").map_err(|e| e.to_string())
+    }
+
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    pub fn get() -> Option<String> {
+        entry().ok()?.get_password().ok()
+    }
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    pub fn set(token: &str) -> Result<(), String> {
+        entry()?.set_password(token).map_err(|e| e.to_string())
+    }
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    pub fn delete() -> Result<(), String> {
+        match entry()?.delete_credential() {
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Err(e) => Err(e.to_string()),
+        }
+    }
+
+    #[cfg(any(target_os = "ios", target_os = "android"))]
+    pub fn get() -> Option<String> {
+        None
+    }
+    #[cfg(any(target_os = "ios", target_os = "android"))]
+    pub fn set(_token: &str) -> Result<(), String> {
+        Ok(())
+    }
+    #[cfg(any(target_os = "ios", target_os = "android"))]
+    pub fn delete() -> Result<(), String> {
+        Ok(())
+    }
 }
 
 /// Forgets the sync server session and restarts on the local-only workspace (its store is untouched).
@@ -530,6 +650,9 @@ pub fn run() {
             node_info,
             github_device_start,
             github_device_poll,
+            github_repos,
+            github_clone,
+            github_sign_out,
             sign_in,
             sign_out,
             snapshot,

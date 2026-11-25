@@ -37,6 +37,8 @@ astra-node = { path = "../../../crates/astra-node", default-features = false }
 astra-node = { path = "../../../crates/astra-node", features = ["runtime"] }
 # The in-app terminal (desktop only).
 portable-pty = "0.9.0"
+# The GitHub token for listing and cloning your repositories (OS keychain; same version as the runtime's).
+keyring = "4"
 # The code editor's diff against the last commit (same build as the runtime's).
 git2 = { version = "0.21", default-features = false, features = ["vendored-libgit2"] }
 
