@@ -64,6 +64,8 @@ pub struct NodeConfig {
     pub relay: Option<RelayConfig>,
     /// Load this seed document when the store is empty.
     pub seed_if_empty: Option<PathBuf>,
+    /// The name a runner node shows under in the workspace (default: this machine's host name).
+    pub name: Option<String>,
 }
 
 impl NodeConfig {
@@ -82,8 +84,26 @@ impl NodeConfig {
             runtime: false,
             relay: None,
             seed_if_empty: None,
+            name: None,
         }
     }
+}
+
+/// This machine's host name without its domain (`build-01.example.com` → `build-01`).
+#[cfg(feature = "runtime")]
+fn host_name() -> Option<String> {
+    let from_env = std::env::var("HOSTNAME")
+        .or_else(|_| std::env::var("COMPUTERNAME"))
+        .ok();
+    let raw = from_env.or_else(|| {
+        std::process::Command::new("hostname")
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+    })?;
+    let name = raw.trim().split('.').next().unwrap_or_default().trim();
+    (!name.is_empty()).then(|| name.to_string())
 }
 
 /// Relay connectivity (`astra://connectivity` payload: `{online, relay}`).
@@ -202,7 +222,12 @@ impl Node {
 
         if config.runtime {
             #[cfg(feature = "runtime")]
-            node.start_runtime(secrets)?;
+            {
+                node.start_runtime(secrets)?;
+                // Announce this runner node so clients can choose it as the place an agent runs. Queued
+                // before the relay connects, so it syncs with the first push.
+                node.announce()?;
+            }
             #[cfg(not(feature = "runtime"))]
             return Err(NodeError::Other(
                 "this build has no agent runtime (feature `runtime`)".into(),
@@ -262,6 +287,27 @@ impl Node {
     }
 
     /// This node's id.
+    /// Puts this runner node's `node` entity (name, owner, platform, start time).
+    #[cfg(feature = "runtime")]
+    fn announce(&self) -> Result<()> {
+        let config = &self.inner.config;
+        let entity = astra_protocol::RunnerNode {
+            id: config.node_id.clone(),
+            name: config
+                .name
+                .clone()
+                .filter(|n| !n.trim().is_empty())
+                .or_else(host_name)
+                .unwrap_or_else(|| config.node_id.clone()),
+            owner_id: config.me.clone(),
+            platform: std::env::consts::OS.to_string(),
+            started_at: astra_protocol::now_rfc3339(),
+        };
+        let op = self.make_op(config.node_id.clone(), OpBody::put(entity));
+        self.apply_ops(vec![op])?;
+        Ok(())
+    }
+
     pub fn node_id(&self) -> &str {
         &self.inner.config.node_id
     }

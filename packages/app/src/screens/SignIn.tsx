@@ -6,8 +6,8 @@ import {
   type Session,
   waitForApproval,
 } from '@astra/client'
-import { Button, buttonClass, Eyebrow, LogoMark, Spec, Status, TextInput } from '@astra/ui'
-import { useEffect, useRef, useState } from 'react'
+import { Button, buttonClass, Eyebrow, Field, LogoMark, Spec, Status, TextInput } from '@astra/ui'
+import { type ReactNode, useEffect, useRef, useState } from 'react'
 
 const providerName: Record<Provider, string> = { github: 'GitHub', gitlab: 'GitLab' }
 
@@ -40,7 +40,8 @@ const mmss = (secs: number) =>
 
 export interface SignInProps {
   auth: Auth
-  onSignedIn: (session: Session) => void
+  /** May return a promise (the desktop app saves the session); a rejection shows as an error. */
+  onSignedIn: (session: Session) => void | Promise<void>
   /** Providers offered, in order. The first is the primary button. */
   providers?: Provider[]
   /** Where "Get the desktop app" points; local folders need the desktop app. */
@@ -49,6 +50,14 @@ export interface SignInProps {
   devAuth?: boolean
   /** Opens the provider's page; injectable for tests. */
   openUrl?: (url: string) => void
+  /** An editable sync server address (the desktop app, which can sign in to any relay). */
+  server?: { value: string; onChange: (value: string) => void; valid?: boolean }
+  /** Starts this provider's device flow right away (arriving from "Continue with GitHub"). */
+  autoStart?: Provider
+  /** Replaces "Get the desktop app" (the desktop app offers to stay local instead). */
+  localAction?: ReactNode
+  /** Replaces the plain brand header (the desktop app needs its title bar and window controls). */
+  header?: ReactNode
 }
 
 /**
@@ -62,6 +71,10 @@ export function SignIn({
   desktopUrl = 'https://github.com/mindify-ai/Astra/releases/latest',
   devAuth = false,
   openUrl = (url) => window.open(url, '_blank', 'noopener,noreferrer'),
+  server,
+  autoStart,
+  localAction,
+  header,
 }: SignInProps) {
   const [step, setStep] = useState<Step>({ kind: 'idle' })
   const [copied, setCopied] = useState(false)
@@ -91,7 +104,7 @@ export function SignIn({
       setStep({ kind: 'code', provider, code, issuedAt: Date.now() })
       const session = await waitForApproval(auth, provider, code, { signal: ctrl.signal })
       setStep({ kind: 'done', session })
-      onSignedIn(session)
+      await onSignedIn(session)
     } catch (e) {
       if (e instanceof AuthError && e.code === 'cancelled') return
       setStep({ kind: 'error', provider, message: explain(e, provider) })
@@ -117,24 +130,32 @@ export function SignIn({
     try {
       const session = await auth.devToken(devName.trim())
       setStep({ kind: 'done', session })
-      onSignedIn(session)
+      await onSignedIn(session)
     } catch (e) {
       setStep({ kind: 'error', provider: null, message: explain(e, null) })
     }
   }
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: start once, on arrival
+  useEffect(() => {
+    if (autoStart) void begin(autoStart)
+  }, [])
+
   const primary = providers[0]
+  const noServer = server !== undefined && (server.valid === false || server.value.trim() === '')
 
   return (
     <div className="flex min-h-dvh flex-col bg-surface text-ink">
-      <header className="flex min-h-14 items-center gap-x-6 box-border px-6">
-        <span className="flex items-center gap-3">
-          <LogoMark />
-          <span className="text-label tracking-[0.22em]">ASTRA</span>
-        </span>
-        <div className="grow" />
-        <Spec>By Mindify AI</Spec>
-      </header>
+      {header ?? (
+        <header className="flex min-h-14 items-center gap-x-6 box-border px-6">
+          <span className="flex items-center gap-3">
+            <LogoMark />
+            <span className="text-label tracking-[0.22em]">ASTRA</span>
+          </span>
+          <div className="grow" />
+          <Spec>By Mindify AI</Spec>
+        </header>
+      )}
 
       <main className="relative flex grow items-end overflow-hidden box-border p-6 sm:p-12">
         <div aria-hidden="true" className="pointer-events-none absolute top-6 -right-40 h-[540px] w-[760px]">
@@ -154,6 +175,20 @@ export function SignIn({
 
           {step.kind === 'idle' || step.kind === 'starting' || step.kind === 'error' ? (
             <>
+              {server ? (
+                <Field label="Sync server" className="mt-8 max-w-[420px]">
+                  {(id) => (
+                    <TextInput
+                      id={id}
+                      mono
+                      inputMode="url"
+                      placeholder="https://sync.example.com"
+                      value={server.value}
+                      onChange={(e) => server.onChange(e.target.value)}
+                    />
+                  )}
+                </Field>
+              ) : null}
               <div className="mt-8 flex flex-wrap gap-3">
                 {providers.map((p) => {
                   const busy = step.kind === 'starting' && step.provider === p
@@ -162,20 +197,22 @@ export function SignIn({
                       key={p}
                       size="lg"
                       variant={p === primary ? 'primary' : 'outline'}
-                      disabled={step.kind === 'starting'}
+                      disabled={step.kind === 'starting' || noServer}
                       onClick={() => void begin(p)}
                     >
                       {busy ? 'Connecting…' : `Continue with ${providerName[p]}${p === primary ? ' →' : ''}`}
                     </Button>
                   )
                 })}
-                <a
-                  href={desktopUrl}
-                  className={buttonClass('outline', 'lg')}
-                  title="Local folders open in the desktop app"
-                >
-                  Get the desktop app
-                </a>
+                {localAction ?? (
+                  <a
+                    href={desktopUrl}
+                    className={buttonClass('outline', 'lg')}
+                    title="Local folders open in the desktop app"
+                  >
+                    Get the desktop app
+                  </a>
+                )}
               </div>
               {step.kind === 'error' ? (
                 <p role="alert" className="m-0 mt-6">

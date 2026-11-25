@@ -64,6 +64,9 @@ curl -s -X POST localhost:8787/v1/auth/dev-token -H 'content-type: application/j
 ASTRA_TOKEN=<token> ./target/debug/astrad run --workspace ws-dev --me p-dev-mark --node-id n-desk --relay-url http://127.0.0.1:8787
 ```
 
+The runner announces itself to the workspace (as `--name`, else its host name). On _Connect agents_, pick it under
+_Runs on_ to run an agent there. Start `astrad` the same way on a server to attach agents that run on that box.
+
 ```bash
 VITE_ASTRA_RELAY_URL=http://127.0.0.1:8787 VITE_ASTRA_DEV_AUTH=1 pnpm dev
 ```
@@ -84,6 +87,8 @@ it on GitHub, and no password or GitHub token ever reaches the browser.
 - The relay needs `GITHUB_CLIENT_ID` from a GitHub OAuth app with **device flow enabled**. With Terraform this is
   `github_oauth_client_id`.
 - Add `?signin` to the demo URL to try the sign-in screen without a relay.
+- The desktop app signs in the same way from Welcome's _Continue with GitHub_. It offers the relay in
+  `VITE_ASTRA_RELAY_URL` at build time, and you can type another.
 
 ## Layout
 

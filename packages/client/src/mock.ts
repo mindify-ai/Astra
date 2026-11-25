@@ -191,7 +191,7 @@ export class MockClient extends Store {
           return this.ok(node, op)
         case 'connectAgent':
           this.later(() => {
-            this.node(node, [this.patch('agent', cmd.agentId, { status: 'connected' })])
+            this.node(node, [this.patch('agent', cmd.agentId, { status: 'connected', nodeId: node })])
             this.ok(node, op)
           })
           return

@@ -57,6 +57,24 @@ export interface Auth {
 
 type Fetch = typeof fetch
 
+/**
+ * A sync server address as typed (`sync.example.com`, `http://127.0.0.1:8787/`) → its HTTP base URL
+ * (`https://sync.example.com`). Hosts without a scheme get https, except localhost. Null if it isn't a URL.
+ */
+export function serverBaseUrl(input: string): string | null {
+  const raw = input.trim()
+  if (!raw) return null
+  const local = /^(localhost|127\.|\[::1\])/.test(raw)
+  const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? raw : `${local ? 'http' : 'https'}://${raw}`
+  try {
+    const url = new URL(withScheme)
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null
+    return url.origin + url.pathname.replace(/\/+$/, '')
+  } catch {
+    return null
+  }
+}
+
 export class RelayAuth implements Auth {
   constructor(
     private readonly relayUrl: string,

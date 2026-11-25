@@ -1,7 +1,9 @@
 import { ulid } from './hlc'
+import { DEFAULT_NODE, defaultRunner, nodeForAgent } from './nodes'
 import type { AstraClient, CommandOutcome } from './store'
 import type {
   Access,
+  AgentConnection,
   AgentType,
   Command,
   Entity,
@@ -14,11 +16,12 @@ import type {
   State,
 } from './types'
 
+export { DEFAULT_NODE, defaultRunner, nodeForAgent, runnerNodes } from './nodes'
+
 /** Runner node that executes commands for a mission. Falls back to the local desktop node id. */
 export function nodeForMission(state: State, missionId: Id): Id {
   return state.missions[missionId]?.nodeId ?? DEFAULT_NODE
 }
-export const DEFAULT_NODE = 'n-local'
 
 const command = (node: Id, cmd: Command): OpBody => ({ type: 'command', node, command: cmd })
 
@@ -61,7 +64,10 @@ export async function createMission(client: AstraClient, draft: MissionDraft): P
   const id = `m-${String(number).padStart(3, '0')}-${ulid().slice(-6).toLowerCase()}`
   const title = draft.title ?? titleFromGoal(draft.goal)
   const branch = draft.branch?.trim() || `astra/${slugify(title)}`
-  const nodeId = draft.nodeId ?? Object.values(state.agents).find((a) => a.nodeId)?.nodeId ?? DEFAULT_NODE
+  // A mission runs on one runner node: the one its first enabled agent runs on, unless the draft names one.
+  const lead = draft.agents.find((a) => a.enabled) ?? draft.agents[0]
+  const nodeId =
+    draft.nodeId ?? nodeForAgent(state, lead ? state.agents[lead.agentId] : undefined, client.nodeId)
   const words = title.split(/\s+/)
   const entities: Entity[] = [
     {
@@ -298,18 +304,34 @@ export async function removeAgent(client: AstraClient, missionAgentId: Id): Prom
   return outcomeOf(client, ops)
 }
 
-/** Saves an agent's setup and asks its node to connect it; resolves with the node's answer. */
+export type AgentSetup = Partial<Omit<AgentConnection, 'kind' | 'id' | 'status'>>
+
+/**
+ * Saves an agent's setup and asks the runner node it runs on to connect it; resolves with the node's answer.
+ *
+ * `setup.nodeId` attaches the agent to a runner node (this machine, or `astrad` on a server); by default it
+ * stays where it ran, or goes to {@link defaultRunner}. The whole agent is put rather than patched, so an agent
+ * from the built-in catalog (`base`) that only this client knew about reaches every client and node.
+ */
 export async function connectAgent(
   client: AstraClient,
   agentId: Id,
-  patch: Record<string, unknown>,
-  node = DEFAULT_NODE,
+  setup: AgentSetup = {},
+  base?: AgentConnection,
 ): Promise<CommandOutcome | null> {
   const state = client.getState()
-  const nodeId =
-    state.agents[agentId]?.nodeId ?? Object.values(state.agents).find((a) => a.nodeId)?.nodeId ?? node
+  const current = state.agents[agentId] ?? base
+  if (!current) return null
+  const nodeId = setup.nodeId ?? nodeForAgent(state, current, client.nodeId)
+  const agent: AgentConnection = {
+    ...current,
+    ...setup,
+    nodeId,
+    runsOn: setup.runsOn ?? (nodeId === client.nodeId ? 'local' : 'server'),
+    status: 'settingUp',
+  }
   const ops = await client.submit([
-    { type: 'patch', entityKind: 'agent', id: agentId, fields: { ...patch, nodeId, status: 'settingUp' } },
+    { type: 'put', entity: agent },
     command(nodeId, { type: 'connectAgent', agentId }),
   ])
   return outcomeOf(client, ops)
@@ -318,8 +340,7 @@ export async function connectAgent(
 /** Asks the agent's node whether it can reach the agent as set up now; resolves with the node's answer. */
 export async function testAgent(client: AstraClient, agentId: Id): Promise<CommandOutcome | null> {
   const state = client.getState()
-  const nodeId =
-    state.agents[agentId]?.nodeId ?? Object.values(state.agents).find((a) => a.nodeId)?.nodeId ?? DEFAULT_NODE
+  const nodeId = nodeForAgent(state, state.agents[agentId], client.nodeId)
   return outcomeOf(client, await client.submit([command(nodeId, { type: 'testAgent', agentId })]))
 }
 

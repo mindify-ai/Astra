@@ -1,4 +1,13 @@
-import type { AstraClient, Connectivity, FilesHost, State, TerminalHost } from '@astra/client'
+import type {
+  AstraClient,
+  Auth,
+  Connectivity,
+  FilesHost,
+  Person,
+  Session,
+  State,
+  TerminalHost,
+} from '@astra/client'
 import type { DesktopPlatform, MobilePlatform, WindowActions } from '@astra/ui'
 import {
   createContext,
@@ -80,13 +89,27 @@ function useNarrow(): boolean {
 
 // ── Host capabilities (provided by the desktop/mobile shell; absent on the web) ──
 
+/** Signing this app in to a sync server (the desktop app; the web app signs in before it opens). */
+export interface HostAccount {
+  /** The server signed in to, or the one to offer; empty when none is known. */
+  server: string
+  /** Who is signed in; null in a local-only workspace. */
+  person: Person | null
+  /** The OAuth device flow, run through `server`. */
+  auth: (server: string) => Auth
+  /** Saves the session and reopens the app on that server's workspace. */
+  signIn: (server: string, session: Session) => Promise<void>
+}
+
 export interface HostCapabilities {
   /** Native folder picker; returns an absolute path. */
   pickFolder?: () => Promise<string | null>
   /** Copies text to the clipboard. */
   copy?: (text: string) => Promise<void>
-  /** Ends the session (web, signed in to a relay). */
+  /** Ends the session (signed in to a relay). */
   signOut?: () => void
+  /** Signs in to a sync server from inside the app (desktop app). */
+  account?: HostAccount
   /** Runs shells on this machine for the terminal dock (desktop app). */
   terminal?: TerminalHost
   /** Reads and writes the repository's files for the code editor (desktop app). */

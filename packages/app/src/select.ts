@@ -11,7 +11,7 @@ import type {
   State,
   TaskColumn,
 } from '@astra/client'
-import { mayDecide, maySteer } from '@astra/client'
+import { mayDecide, maySteer, starterSeed } from '@astra/client'
 import type { Tone } from '@astra/ui'
 
 export const roleName: Record<Role, string> = {
@@ -133,6 +133,23 @@ export const agentOf = (s: State, ma: MissionAgent | undefined): AgentConnection
 export function currentMissionId(s: State, preferred: Id | null): Id | null {
   if (preferred && s.missions[preferred]) return preferred
   return orderedMissions(s)[0]?.id ?? null
+}
+
+const catalog = starterSeed.entities.filter((e): e is AgentConnection => e.kind === 'agent')
+
+/**
+ * Agents you can connect: the workspace's own, plus any from the built-in catalog it has not seen yet (a
+ * workspace on a sync server starts empty). Connecting a catalog agent puts it into the workspace.
+ */
+export function agentCatalog(agents: State['agents']): AgentConnection[] {
+  const known = new Set(catalog.map((a) => a.id))
+  return [...catalog.map((a) => agents[a.id] ?? a), ...Object.values(agents).filter((a) => !known.has(a.id))]
+}
+
+const platformName: Record<string, string> = { macos: 'MACOS', linux: 'LINUX', windows: 'WINDOWS' }
+/** `macos` → `MACOS`, for spec labels. */
+export function platformLabel(platform: string): string {
+  return platformName[platform] ?? platform.toUpperCase()
 }
 
 export function connectedAgents(s: State): AgentConnection[] {

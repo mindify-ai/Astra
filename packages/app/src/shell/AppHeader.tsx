@@ -89,6 +89,17 @@ function AppMenu() {
               Terminal
             </button>
           ) : null}
+          {host.account && !host.account.person ? (
+            <Link
+              role="menuitem"
+              to="/signin"
+              search={{ provider: 'github' }}
+              className={`${item} border-t border-line`}
+              onClick={() => setOpen(false)}
+            >
+              Sign in to sync
+            </Link>
+          ) : null}
           {host.signOut ? (
             <button
               type="button"

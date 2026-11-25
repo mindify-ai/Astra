@@ -196,6 +196,19 @@ export interface AgentType {
   instructions: string
 }
 
+/** A runner node (the desktop app or astrad) that runs agents. Each node puts its own entry when it starts. */
+export interface RunnerNode {
+  kind: 'node'
+  id: Id
+  /** The machine's host name unless the node was given one. */
+  name: string
+  /** The person the node runs as. */
+  ownerId: Id
+  /** `macos`, `linux`, `windows`, … */
+  platform: string
+  startedAt: Timestamp
+}
+
 export type Entity =
   | Person
   | Repository
@@ -209,6 +222,7 @@ export type Entity =
   | MergeRecord
   | Membership
   | AgentType
+  | RunnerNode
 
 export type EntityKind = Entity['kind']
 export type EntityOf<K extends EntityKind> = Extract<Entity, { kind: K }>
@@ -235,6 +249,7 @@ export interface State {
   merges: Record<Id, MergeRecord>
   memberships: Record<Id, Membership>
   agentTypes: Record<Id, AgentType>
+  nodes: Record<Id, RunnerNode>
   presence: Presence[]
 }
 
@@ -294,4 +309,5 @@ export const collectionOf = {
   merge: 'merges',
   membership: 'memberships',
   agentType: 'agentTypes',
+  node: 'nodes',
 } as const satisfies Record<EntityKind, keyof State>

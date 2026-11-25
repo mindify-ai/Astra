@@ -23,6 +23,8 @@ export interface CommandOutcome {
 /** What every UI talks to, whether data comes from the in-browser mock, a local Tauri node or a remote relay. */
 export interface AstraClient {
   readonly kind: 'mock' | 'tauri' | 'remote'
+  /** This client's node id: a runner node's id in the desktop app, a sync-only id on the web and phones. */
+  readonly nodeId: string
   /** Resolves once the first state is loaded. */
   readonly ready: Promise<void>
   getState(): State
@@ -50,7 +52,10 @@ export abstract class Store implements AstraClient {
   private outcomes = new Map<Id, CommandOutcome>()
   private waiting = new Map<Id, ((o: CommandOutcome) => void)[]>()
 
-  constructor(readonly nodeId: string) {
+  nodeId: string
+
+  constructor(nodeId: string) {
+    this.nodeId = nodeId
     this.clock = new HlcClock(nodeId)
   }
 

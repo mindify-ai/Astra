@@ -41,7 +41,16 @@ It works remotely or fully locally, with or without internet.
 | **Local**       | The desktop alone: agents, git, data. No account.         | No (with local models)         |
 | **Connected**   | Desktop runner + relay, so phone, web and teammates join. | For remote clients             |
 | **Your server** | `astrad` on a box you own runs agents; any client steers. | Between clients and the server |
-| **LAN**         | Phone pairs directly with the desktop by QR code.         | No                             |
+
+**Attaching a runner node.** Every runner node puts a `node` entity when it starts. On the Connect screen, _Runs
+on_ lists them (this machine first), and picking one attaches the agent there: its commands go to that node, which
+connects the agent with its own keys. A mission runs on the node of its first enabled agent. To add a server, run
+`astrad` there signed in to the workspace's relay (see the README).
+
+**Desktop sign-in.** _Continue with GitHub_ on Welcome (or _Sign in to sync_) runs the relay's device flow from
+the desktop app, then restarts the node on that workspace in its own store. _Use this machine only_ keeps the
+local workspace.
+| **LAN** | Phone pairs directly with the desktop by QR code. | No |
 
 ## Repository
 
@@ -124,6 +133,6 @@ It works remotely or fully locally, with or without internet.
 - **Agent sandboxing.** Agent file access is confined to its worktree, and commands follow the approval policy.
 - **Tauri.** The webview's capabilities are limited to window controls, the OS info read, the folder picker and
   clipboard writes. Files, processes and the network go through the Rust core.
-- **Relay.** The relay authenticates with JWT (GitHub/GitLab OAuth device flow) and enforces workspace
-  membership. It stores ops (messages, diffs, statuses), not repositories.
+- **Relay.** The relay authenticates with JWT (GitHub/GitLab OAuth device flow, from the web or the desktop app)
+  and enforces workspace membership. It stores ops (messages, diffs, statuses), not repositories.
 - **LAN pairing.** It uses a one-time code from a QR scan.

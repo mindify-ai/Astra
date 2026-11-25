@@ -13,8 +13,10 @@
 
 ## Next
 
-1. **Auth and onboarding.** Web sign-in through the GitHub/GitLab device flow is built (docs/PROTOCOL.md "Auth").
-   Next: list repositories from the provider APIs instead of the seed, and sign the desktop app in to a relay.
+1. **Auth and onboarding.** Web and desktop sign-in through the GitHub/GitLab device flow is built
+   (docs/PROTOCOL.md "Auth"), and agents can be attached to any runner node of the workspace. Next: list
+   repositories from the provider APIs instead of the seed, `astrad login` (device flow from the terminal instead
+   of a pasted token), and online status for runner nodes from the relay's node registry.
 2. **Push and PRs.** Push mission branches and open pull requests from Merge (GitHub/GitLab APIs) alongside the
    local merge.
 3. **Mobile notifications.** APNs/FCM push for _Needs you_, routed by the relay.

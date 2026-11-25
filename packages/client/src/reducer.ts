@@ -41,6 +41,7 @@ export function emptyState(workspaceId = '', me = ''): State {
     merges: {},
     memberships: {},
     agentTypes: {},
+    nodes: {},
     presence: [],
   }
 }

@@ -9,6 +9,7 @@ import {
 } from '@tanstack/react-router'
 import { useAstraState, usePlatform } from './context'
 import { MobileAgents, MobileHome, MobilePeople, MobileReview, MobileThread } from './mobile/MobileScreens'
+import { AccountSignIn } from './screens/AccountSignIn'
 import { Board } from './screens/Board'
 import { CodeReview } from './screens/CodeReview'
 import { Connect } from './screens/Connect'
@@ -55,6 +56,16 @@ const homeRoute = createRoute({
   component: () => <Adaptive desktop={<DesktopHome />} mobile={<MobileHome />} />,
 })
 const welcomeRoute = createRoute({ getParentRoute: () => rootRoute, path: '/welcome', component: Welcome })
+const signInRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/signin',
+  validateSearch: (search: Record<string, unknown>): { provider?: 'github' | 'gitlab' } =>
+    search.provider === 'github' || search.provider === 'gitlab' ? { provider: search.provider } : {},
+  component: function SignInRoute() {
+    const { provider } = signInRoute.useSearch()
+    return <AccountSignIn provider={provider} />
+  },
+})
 const repoRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/setup/repo',
@@ -139,6 +150,7 @@ const peopleRoute = createRoute({
 const routeTree = rootRoute.addChildren([
   homeRoute,
   welcomeRoute,
+  signInRoute,
   repoRoute,
   connectRoute,
   launchRoute,

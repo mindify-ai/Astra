@@ -512,6 +512,115 @@
           }
         }
       ]
+    },
+    {
+      "name": "runner nodes: a node announces itself, a restart re-puts it, and an agent moves to it",
+      "initial": [
+        {
+          "kind": "agent",
+          "id": "a-1",
+          "name": "Claude Code",
+          "vendor": "ANTHROPIC",
+          "category": "codingAgent",
+          "transport": "CLI on this machine",
+          "adapter": null,
+          "runsOn": "local",
+          "nodeId": "n-desk",
+          "commandPolicy": "askMe",
+          "status": "connected",
+          "requiresNetwork": true
+        }
+      ],
+      "ops": [
+        {
+          "id": "01J0000000000000000000NA01",
+          "hlc": "0001732180000100:000000:n-build",
+          "actor": "n-build",
+          "body": {
+            "type": "put",
+            "entity": {
+              "kind": "node",
+              "id": "n-build",
+              "name": "build",
+              "ownerId": "p-mark",
+              "platform": "linux",
+              "startedAt": "2026-11-20T19:04:00Z"
+            }
+          }
+        },
+        {
+          "id": "01J0000000000000000000NA02",
+          "hlc": "0001732180000200:000000:n1",
+          "actor": "p-mark",
+          "body": {
+            "type": "put",
+            "entity": {
+              "kind": "agent",
+              "id": "a-1",
+              "name": "Claude Code",
+              "vendor": "ANTHROPIC",
+              "category": "codingAgent",
+              "transport": "CLI on this machine",
+              "adapter": null,
+              "runsOn": "server",
+              "nodeId": "n-build",
+              "commandPolicy": "askMe",
+              "status": "settingUp",
+              "requiresNetwork": true
+            }
+          }
+        },
+        {
+          "id": "01J0000000000000000000NA03",
+          "hlc": "0001732180000300:000000:n-build",
+          "actor": "n-build",
+          "body": {
+            "type": "patch",
+            "entityKind": "agent",
+            "id": "a-1",
+            "fields": {
+              "status": "connected",
+              "nodeId": "n-build"
+            }
+          }
+        },
+        {
+          "id": "01J0000000000000000000NA04",
+          "hlc": "0001732180000400:000000:n-build",
+          "actor": "n-build",
+          "body": {
+            "type": "put",
+            "entity": {
+              "kind": "node",
+              "id": "n-build",
+              "name": "build-01",
+              "ownerId": "p-mark",
+              "platform": "linux",
+              "startedAt": "2026-11-21T08:00:00Z"
+            }
+          }
+        }
+      ],
+      "expect": [
+        {
+          "kind": "node",
+          "id": "n-build",
+          "fields": {
+            "name": "build-01",
+            "ownerId": "p-mark",
+            "startedAt": "2026-11-21T08:00:00Z"
+          }
+        },
+        {
+          "kind": "agent",
+          "id": "a-1",
+          "fields": {
+            "nodeId": "n-build",
+            "runsOn": "server",
+            "status": "connected"
+          }
+        }
+      ]
     }
   ],
   "rules": [

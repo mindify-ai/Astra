@@ -45,6 +45,9 @@ struct RunArgs {
     /// Local person id (defaults to the node id).
     #[arg(long, env = "ASTRA_ME")]
     me: Option<String>,
+    /// Name this runner node shows under in the workspace (default: the host name).
+    #[arg(long, env = "ASTRA_NODE_NAME")]
+    name: Option<String>,
     /// Sync relay WebSocket URL, e.g. wss://astra.example.com/v1/sync.
     #[arg(long, env = "ASTRA_RELAY_URL")]
     relay_url: Option<String>,
@@ -141,6 +144,7 @@ async fn run(args: RunArgs) -> anyhow::Result<()> {
     config.runtime = !args.no_runtime;
     config.relay = relay;
     config.seed_if_empty = args.seed.clone();
+    config.name = args.name.clone();
     let node = Node::open(config).await.context("open node")?;
     tracing::info!(node = %args.node_id, workspace = %args.workspace, data_dir = %args.data_dir.display(), "astrad running");
 

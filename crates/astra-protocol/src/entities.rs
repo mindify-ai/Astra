@@ -248,6 +248,22 @@ pub struct AgentType {
     pub instructions: String,
 }
 
+/// A runner node (the desktop app or `astrad`) that runs agents for the workspace. Each runner node puts its
+/// own entry when it starts; clients pick one as the place an agent runs (`agent.nodeId`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunnerNode {
+    pub id: String,
+    /// Display name: the machine's host name unless the node was given one.
+    pub name: String,
+    /// The person the node runs as (whose session it signed in to the relay with).
+    pub owner_id: String,
+    /// The operating system: `macos`, `linux`, `windows`, ...
+    pub platform: String,
+    /// When the node last started.
+    pub started_at: String,
+}
+
 /// A board task.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -354,12 +370,12 @@ pub struct Presence {
 
 string_enum!(
     /// Discriminant of [`Entity`] (the `kind` field / `entityKind` in ops).
-    EntityKind { Person, Repository, Agent, Mission, MissionAgent, Task, Message, Approval, Result, Merge, Membership, AgentType }
+    EntityKind { Person, Repository, Agent, Mission, MissionAgent, Task, Message, Approval, Result, Merge, Membership, AgentType, Node }
 );
 
 impl EntityKind {
     /// All kinds.
-    pub const ALL: [EntityKind; 12] = [
+    pub const ALL: [EntityKind; 13] = [
         EntityKind::Person,
         EntityKind::Repository,
         EntityKind::Agent,
@@ -372,6 +388,7 @@ impl EntityKind {
         EntityKind::Merge,
         EntityKind::Membership,
         EntityKind::AgentType,
+        EntityKind::Node,
     ];
 
     /// The wire string (`"missionAgent"`).
@@ -389,6 +406,7 @@ impl EntityKind {
             EntityKind::Merge => "merge",
             EntityKind::Membership => "membership",
             EntityKind::AgentType => "agentType",
+            EntityKind::Node => "node",
         }
     }
 
@@ -420,6 +438,7 @@ pub enum Entity {
     Merge(Merge),
     Membership(Membership),
     AgentType(AgentType),
+    Node(RunnerNode),
 }
 
 impl Entity {
@@ -438,6 +457,7 @@ impl Entity {
             Entity::Merge(_) => EntityKind::Merge,
             Entity::Membership(_) => EntityKind::Membership,
             Entity::AgentType(_) => EntityKind::AgentType,
+            Entity::Node(_) => EntityKind::Node,
         }
     }
 
@@ -456,6 +476,7 @@ impl Entity {
             Entity::Merge(e) => &e.id,
             Entity::Membership(e) => &e.id,
             Entity::AgentType(e) => &e.id,
+            Entity::Node(e) => &e.id,
         }
     }
 
@@ -502,4 +523,5 @@ entity_from!(
     Merge => Merge,
     Membership => Membership,
     AgentType => AgentType,
+    RunnerNode => Node,
 );

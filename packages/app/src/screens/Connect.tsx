@@ -4,6 +4,10 @@ import {
   type CommandOutcome,
   type CommandPolicy,
   connectAgent,
+  defaultRunner,
+  type Id,
+  type RunnerNode,
+  runnerNodes,
   testAgent,
 } from '@astra/client'
 import {
@@ -20,8 +24,9 @@ import {
   TextInput,
 } from '@astra/ui'
 import { Link } from '@tanstack/react-router'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useAstraState, useClient } from '../context'
+import { agentCatalog, personName, platformLabel } from '../select'
 import { AppHeader, Page } from '../shell/AppHeader'
 import { AgentTypesSection } from './AgentTypes'
 
@@ -67,33 +72,89 @@ function RowStatus({
 
 type Note = { tone: 'working' | 'success' | 'danger'; text: string }
 
+/**
+ * The runner nodes an agent can run on: this machine (the desktop app) first, then the workspace's other
+ * nodes (`astrad` on a server, teammates' desktops). An agent's node that never announced itself still shows.
+ */
+function useRunnerOptions(agentNodeId: Id | null): RunnerNode[] {
+  const state = useAstraState()
+  const client = useClient()
+  return useMemo(() => {
+    const nodes = runnerNodes(state)
+    const local = nodes.filter((n) => n.id === client.nodeId)
+    const rest = nodes.filter((n) => n.id !== client.nodeId)
+    const known = agentNodeId === null || nodes.some((n) => n.id === agentNodeId)
+    const unknown: RunnerNode[] = known
+      ? []
+      : [{ kind: 'node', id: agentNodeId, name: agentNodeId, ownerId: '', platform: '', startedAt: '' }]
+    return [...local, ...rest, ...unknown]
+  }, [state, client.nodeId, agentNodeId])
+}
+
+function RunnerChoice({ node, isLocal }: { node: RunnerNode; isLocal: boolean }) {
+  const state = useAstraState()
+  const owner = node.ownerId && node.ownerId !== state.me ? personName(state, node.ownerId) : ''
+  const spec = [node.platform ? platformLabel(node.platform) : '', owner.toUpperCase()].filter(Boolean)
+  return (
+    <span className="flex flex-wrap items-baseline gap-x-2">
+      <span>{isLocal ? 'This machine' : node.name}</span>
+      {spec.length > 0 ? <Spec>{spec.join(' · ')}</Spec> : null}
+    </span>
+  )
+}
+
 /** Keyed by agent id, so a status update from the node does not reset what you are typing. */
 function SetupForm({ agent }: { agent: AgentConnection }) {
   const client = useClient()
+  const state = useAstraState()
+  const nodes = useRunnerOptions(agent.nodeId)
   const [name, setName] = useState(agent.name)
   const [adapter, setAdapter] = useState<Adapter>(() => defaultAdapter(agent))
-  const [runsOn, setRunsOn] = useState(agent.runsOn)
+  // Until you pick one: where it runs now, else the default (nodes may arrive after the form opens).
+  const [picked, setNodeId] = useState<Id | null>(null)
+  const nodeId = picked ?? (nodes.length === 0 ? null : (agent.nodeId ?? defaultRunner(state, client.nodeId)))
   const [policy, setPolicy] = useState<CommandPolicy>(agent.commandPolicy)
   const [note, setNote] = useState<Note | null>(null)
+  const hasServer = nodes.some((n) => n.id !== client.nodeId)
+  /** A node's name for messages; null for this machine. */
+  const remoteName = (id: Id | null) =>
+    !id || id === client.nodeId ? null : (nodes.find((n) => n.id === id)?.name ?? id)
 
-  const report = (o: CommandOutcome | null, okText: string) =>
+  const report = (o: CommandOutcome | null, node: Id | null, okText: string) => {
+    const remote = remoteName(node)
     setNote(
       o === null
-        ? { tone: 'danger', text: 'This machine did not answer. Is Astra running here?' }
+        ? {
+            tone: 'danger',
+            text: remote
+              ? `${remote} did not answer. Is it running and online?`
+              : 'This machine did not answer. Is Astra running here?',
+          }
         : o.ok
           ? { tone: 'success', text: okText }
           : { tone: 'danger', text: o.error ?? 'Could not connect.' },
     )
+  }
   const save = async () => {
+    if (!nodeId) return
+    const remote = remoteName(nodeId)
     setNote({ tone: 'working', text: 'Connecting' })
     report(
-      await connectAgent(client, agent.id, { name, adapter, runsOn, commandPolicy: policy }),
-      'Connected',
+      await connectAgent(client, agent.id, { name, adapter, nodeId, commandPolicy: policy }, agent),
+      nodeId,
+      remote ? `Connected on ${remote}` : 'Connected',
     )
   }
+  // Tests the agent where it runs now (as last connected), not where the form would move it.
   const test = async () => {
+    const node = agent.nodeId ?? nodeId
+    const remote = remoteName(node)
     setNote({ tone: 'working', text: 'Testing' })
-    report(await testAgent(client, agent.id), 'Reachable from this machine')
+    report(
+      await testAgent(client, agent.id),
+      node,
+      remote ? `Reachable from ${remote}` : 'Reachable from this machine',
+    )
   }
 
   return (
@@ -192,13 +253,23 @@ function SetupForm({ agent }: { agent: AgentConnection }) {
       ) : null}
 
       <Fieldset legend="Runs on">
-        <Radio name="runs-on" checked={runsOn === 'local'} onChange={() => setRunsOn('local')}>
-          This machine
-        </Radio>
-        <Radio name="runs-on" checked={runsOn === 'server'} onChange={() => setRunsOn('server')}>
-          Your server
-        </Radio>
+        {nodes.map((n) => (
+          <Radio key={n.id} name="runs-on" checked={nodeId === n.id} onChange={() => setNodeId(n.id)}>
+            <RunnerChoice node={n} isLocal={n.id === client.nodeId} />
+          </Radio>
+        ))}
+        {nodes.length === 0 ? (
+          <p className="m-0 text-ink-muted">
+            No runner node has joined this workspace yet. Open the desktop app signed in to it, or run astrad
+            on your server.
+          </p>
+        ) : null}
       </Fieldset>
+      {nodes.length > 0 && !hasServer ? (
+        <Spec as="p" className="m-0">
+          To run agents on your own server, start astrad there signed in to this workspace. It shows here.
+        </Spec>
+      ) : null}
       <Field label="Before it runs a command">
         {(id) => (
           <Select id={id} value={policy} onChange={(e) => setPolicy(e.target.value as CommandPolicy)}>
@@ -209,8 +280,10 @@ function SetupForm({ agent }: { agent: AgentConnection }) {
         )}
       </Field>
       <div className="flex flex-wrap gap-3">
-        <Button type="submit">Connect agent</Button>
-        <Button variant="outline" onClick={test}>
+        <Button type="submit" disabled={!nodeId}>
+          Connect agent
+        </Button>
+        <Button variant="outline" onClick={test} disabled={!nodeId}>
           Test
         </Button>
       </div>
@@ -227,11 +300,12 @@ function SetupForm({ agent }: { agent: AgentConnection }) {
 /** 3 · Connect agents (setup step 2 of 2). */
 export function Connect() {
   const state = useAstraState()
-  const agents = Object.values(state.agents)
+  const client = useClient()
+  const agents = useMemo(() => agentCatalog(state.agents), [state.agents])
   const [selectedId, setSelectedId] = useState<string>(
     () => agents.find((a) => a.id === 'a-langgraph')?.id ?? agents[0]?.id ?? '',
   )
-  const selected = state.agents[selectedId]
+  const selected = agents.find((a) => a.id === selectedId)
 
   return (
     <Page
@@ -285,7 +359,12 @@ export function Connect() {
                           {a.name}
                         </button>
                         <Spec className="flex-[0_0_120px]">{a.vendor}</Spec>
-                        <span className="flex-[1_1_180px] text-ink-muted">{a.transport}</span>
+                        <span className="flex-[1_1_180px] text-ink-muted">
+                          {a.transport}
+                          {a.status === 'connected' && a.nodeId && a.nodeId !== client.nodeId
+                            ? ` · on ${state.nodes[a.nodeId]?.name ?? a.nodeId}`
+                            : ''}
+                        </span>
                         <span className="flex flex-[0_0_116px] justify-end">
                           <RowStatus agent={a} selected={isSel} onConnect={() => setSelectedId(a.id)} />
                         </span>

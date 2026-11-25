@@ -89,7 +89,15 @@ async fn runtime_executes_commands_addressed_to_this_node() {
     let tmp = tempfile::tempdir().expect("tmp");
     let mut cfg = NodeConfig::new(tmp.path(), "n-desk", "ws", "p-me");
     cfg.runtime = true;
+    cfg.name = Some("build-01".into());
     let node = Node::open(cfg).await.expect("open");
+    // A runner node announces itself, so clients can pick it as the place an agent runs.
+    let me = node
+        .with_state(|s| s.nodes.get("n-desk").cloned())
+        .expect("announced");
+    assert_eq!(me.name, "build-01");
+    assert_eq!(me.owner_id, "p-me");
+    assert_eq!(me.platform, std::env::consts::OS);
     let agent = Agent {
         id: "a-sh".into(),
         name: "Shell".into(),

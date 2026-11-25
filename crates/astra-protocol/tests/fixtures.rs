@@ -279,6 +279,7 @@ fn typescript_interfaces_match_serde_shapes() {
     for entity in &seed.entities {
         let ts_name = match entity.kind() {
             EntityKind::Result => "MissionResult".to_string(),
+            EntityKind::Node => "RunnerNode".to_string(),
             k => {
                 let s = k.as_str();
                 let mut c = s.chars();

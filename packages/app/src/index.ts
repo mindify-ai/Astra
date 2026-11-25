@@ -1,6 +1,7 @@
 export { AstraApp, type AstraAppProps } from './App'
 export {
   AstraProvider,
+  type HostAccount,
   type HostCapabilities,
   type Platform,
   useAstraState,

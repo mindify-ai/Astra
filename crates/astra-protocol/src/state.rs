@@ -51,6 +51,8 @@ pub struct State {
     pub memberships: BTreeMap<String, Membership>,
     #[serde(serialize_with = "ser_tagged", default)]
     pub agent_types: BTreeMap<String, AgentType>,
+    #[serde(serialize_with = "ser_tagged", default)]
+    pub nodes: BTreeMap<String, RunnerNode>,
     #[serde(default)]
     pub presence: Vec<Presence>,
 }
@@ -106,6 +108,10 @@ macro_rules! dispatch {
                 let $map = &$self.agent_types;
                 $body
             }
+            EntityKind::Node => {
+                let $map = &$self.nodes;
+                $body
+            }
         }
     };
 }
@@ -159,6 +165,10 @@ macro_rules! dispatch_mut {
             }
             EntityKind::AgentType => {
                 let $map = &mut $self.agent_types;
+                $body
+            }
+            EntityKind::Node => {
+                let $map = &mut $self.nodes;
                 $body
             }
         }
@@ -223,6 +233,9 @@ impl State {
             }
             Entity::AgentType(e) => {
                 self.agent_types.insert(e.id.clone(), e);
+            }
+            Entity::Node(e) => {
+                self.nodes.insert(e.id.clone(), e);
             }
         }
     }

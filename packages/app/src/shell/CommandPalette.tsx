@@ -185,6 +185,14 @@ export function CommandPalette() {
         keywords: 'people invite members',
         run: () => ui.openShare(cm.id),
       })
+    if (host.account && !host.account.person)
+      out.push({
+        id: 'signin',
+        group: 'Actions',
+        label: 'Sign in to sync',
+        keywords: 'github gitlab account relay server team',
+        run: () => void navigate({ to: '/signin', search: { provider: 'github' } }),
+      })
     if (host.signOut) out.push({ id: 'signout', group: 'Actions', label: 'Sign out', run: host.signOut })
     return out
   }, [s, ui, host, query, navigate])

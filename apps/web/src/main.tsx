@@ -104,7 +104,13 @@ function Demo() {
   const auth = useMemo(() => new MockAuth(), [])
   if (!signedIn)
     return (
-      <SignIn auth={auth} devAuth={devAuth} onSignedIn={() => setTimeout(() => setSignedIn(true), 600)} />
+      <SignIn
+        auth={auth}
+        devAuth={devAuth}
+        onSignedIn={() => {
+          setTimeout(() => setSignedIn(true), 600)
+        }}
+      />
     )
   return <Workspace client={client} onSignOut={params.has('signin') ? () => setSignedIn(false) : undefined} />
 }

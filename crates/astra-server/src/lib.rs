@@ -4,7 +4,7 @@
 //! Runtime contract (env): `PORT` (default 8080) or `ASTRA_BIND`; `DATABASE_URL` (unset → in-memory);
 //! `ASTRA_DB_MAX_CONNECTIONS` (10); `ASTRA_JWT_SECRET` (required unless `ASTRA_DEV_AUTH=1`);
 //! `GITHUB_CLIENT_ID` / `GITLAB_CLIENT_ID`; `ASTRA_GITHUB_OAUTH_BASE` / `ASTRA_GITHUB_API_BASE` /
-//! `ASTRA_GITLAB_BASE`; `ASTRA_ALLOWED_ORIGINS`; `ASTRA_RATE_LIMIT_PER_MIN`; `RUST_LOG`; `ASTRA_LOG_FORMAT=json`.
+//! `ASTRA_GITLAB_BASE`; `ASTRA_ALLOWED_ORIGINS` (the desktop app's origins are always allowed); `ASTRA_RATE_LIMIT_PER_MIN`; `RUST_LOG`; `ASTRA_LOG_FORMAT=json`.
 
 pub mod auth;
 pub mod pg;
@@ -171,20 +171,30 @@ async fn readyz(State(state): State<AppState>) -> impl IntoResponse {
     }
 }
 
+/// Origins of the desktop app's webview (macOS/Linux, Windows, Windows with `useHttpsScheme`). The desktop app
+/// signs in through the same device-flow endpoints as the web app, so these are always allowed.
+pub const DESKTOP_ORIGINS: [&str; 3] = [
+    "tauri://localhost",
+    "http://tauri.localhost",
+    "https://tauri.localhost",
+];
+
 fn cors(config: &ServerConfig) -> CorsLayer {
     let base = CorsLayer::new()
         .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
         .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE]);
+    let desktop = DESKTOP_ORIGINS.iter().map(|o| HeaderValue::from_static(o));
     match &config.allowed_origins {
         Some(list) => {
             let origins: Vec<HeaderValue> = list
                 .iter()
                 .filter_map(|o| HeaderValue::from_str(o.trim()).ok())
+                .chain(desktop)
                 .collect();
             base.allow_origin(AllowOrigin::list(origins))
         }
         None if config.dev_auth => base.allow_origin(AllowOrigin::any()),
-        None => base.allow_origin(AllowOrigin::list(Vec::<HeaderValue>::new())),
+        None => base.allow_origin(AllowOrigin::list(desktop)),
     }
 }
 

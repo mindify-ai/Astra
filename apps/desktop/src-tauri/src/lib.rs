@@ -20,6 +20,8 @@ const STARTER: &str = include_str!("../../../../fixtures/starter.json");
 struct AppState {
     node: Arc<Node>,
     info: NodeInfo,
+    /// The app data directory (settings, node id; the local-only workspace's store).
+    root: PathBuf,
 }
 
 #[derive(Clone, Serialize)]
@@ -28,6 +30,19 @@ struct NodeInfo {
     node_id: String,
     workspace_id: String,
     me: String,
+    /// The sync server the app signed in to through the device flow; `None` in a local-only workspace.
+    account: Option<Account>,
+}
+
+/// Who the app signed in as, and where. The relay's session token is kept in `Settings::relay_token`; the
+/// provider's (GitHub/GitLab) token never reaches the app.
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Account {
+    /// The relay's HTTP base URL.
+    server: String,
+    person: serde_json::Value,
+    expires_at: String,
 }
 
 /// Local settings (not synced). Keys never live here: they stay in the OS keychain.
@@ -38,6 +53,18 @@ struct Settings {
     relay_token: Option<String>,
     workspace_id: Option<String>,
     me: Option<String>,
+    /// Set by signing in from the app (`sign_in`); its workspace gets its own store under `workspaces/`.
+    account: Option<Account>,
+}
+
+/// A relay session from the device flow (`@astra/client` `Session`).
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionInput {
+    token: String,
+    workspace_id: String,
+    person: serde_json::Value,
+    expires_at: String,
 }
 
 #[derive(Deserialize)]
@@ -50,6 +77,76 @@ struct PresenceInput {
 #[tauri::command]
 fn node_info(state: State<'_, AppState>) -> NodeInfo {
     state.info.clone()
+}
+
+/// Signs the app in to a sync server with a session from the device flow, then restarts on that workspace.
+#[tauri::command]
+fn sign_in(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    server: String,
+    session: SessionInput,
+) -> Result<(), String> {
+    let server = server.trim().trim_end_matches('/').to_string();
+    let relay_url = sync_url(&server)?;
+    workspace_dir(&state.root, &session.workspace_id)?;
+    let me = session
+        .person
+        .get("id")
+        .and_then(|v| v.as_str())
+        .filter(|id| !id.is_empty())
+        .ok_or("the session has no person")?
+        .to_string();
+    let mut settings = read_settings(&state.root);
+    settings.relay_url = Some(relay_url);
+    settings.relay_token = Some(session.token);
+    settings.workspace_id = Some(session.workspace_id);
+    settings.me = Some(me);
+    settings.account = Some(Account {
+        server,
+        person: session.person,
+        expires_at: session.expires_at,
+    });
+    write_settings(&state.root, &settings).map_err(|e| e.to_string())?;
+    state.node.shutdown();
+    app.restart()
+}
+
+/// Forgets the sync server session and restarts on the local-only workspace (its store is untouched).
+#[tauri::command]
+fn sign_out(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    let mut settings = read_settings(&state.root);
+    settings.relay_url = None;
+    settings.relay_token = None;
+    settings.workspace_id = None;
+    settings.me = None;
+    settings.account = None;
+    write_settings(&state.root, &settings).map_err(|e| e.to_string())?;
+    state.node.shutdown();
+    app.restart()
+}
+
+/// `https://sync.example.com` → `wss://sync.example.com/v1/sync` (http → ws).
+fn sync_url(server: &str) -> Result<String, String> {
+    let rest = |scheme: &str| server.strip_prefix(scheme).filter(|r| !r.is_empty());
+    match (rest("https://"), rest("http://")) {
+        (Some(r), _) => Ok(format!("wss://{r}/v1/sync")),
+        (None, Some(r)) => Ok(format!("ws://{r}/v1/sync")),
+        _ => Err(format!("not a sync server address: {server}")),
+    }
+}
+
+/// Where a signed-in workspace keeps its store: `workspaces/<id>`, apart from the local-only workspace, whose
+/// unsynced ops must never be pushed to a team's server.
+fn workspace_dir(root: &Path, workspace_id: &str) -> Result<PathBuf, String> {
+    let ok = !workspace_id.is_empty()
+        && workspace_id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+    if !ok {
+        return Err(format!("unexpected workspace id: {workspace_id}"));
+    }
+    Ok(root.join("workspaces").join(workspace_id))
 }
 
 #[tauri::command]
@@ -116,6 +213,13 @@ fn read_settings(dir: &Path) -> Settings {
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default()
+}
+
+fn write_settings(dir: &Path, settings: &Settings) -> std::io::Result<()> {
+    let text = serde_json::to_string_pretty(settings).map_err(std::io::Error::other)?;
+    let tmp = dir.join("settings.json.tmp");
+    std::fs::write(&tmp, text)?;
+    std::fs::rename(tmp, dir.join("settings.json"))
 }
 
 /// A stable id for this install, created on first launch.
@@ -206,16 +310,24 @@ fn retire_demo_store(dir: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-async fn start_node(data_dir: PathBuf) -> Result<(Node, NodeInfo), String> {
-    std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
-    retire_demo_store(&data_dir).map_err(|e| e.to_string())?;
-    let settings = read_settings(&data_dir);
-    let node_id = node_id(&data_dir).map_err(|e| e.to_string())?;
+async fn start_node(root: PathBuf) -> Result<(Node, NodeInfo), String> {
+    std::fs::create_dir_all(&root).map_err(|e| e.to_string())?;
+    retire_demo_store(&root).map_err(|e| e.to_string())?;
+    let settings = read_settings(&root);
+    // One node id per install, whichever workspace it opens.
+    let node_id = node_id(&root).map_err(|e| e.to_string())?;
     let workspace_id = settings
         .workspace_id
         .clone()
         .unwrap_or_else(|| "ws-local".into());
     let me = settings.me.clone().unwrap_or_else(|| "p-me".into());
+    // Signed in from the app: that workspace has its own store. A relay set by hand in settings.json keeps
+    // using the root store, as before.
+    let data_dir = match &settings.account {
+        Some(_) => workspace_dir(&root, &workspace_id)?,
+        None => root.clone(),
+    };
+    std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
     // Only read when the store is empty (a first launch).
     let starter_path = data_dir.join("starter.json");
     std::fs::write(&starter_path, starter_seed(&workspace_id, &me, &node_id)?)
@@ -232,6 +344,7 @@ async fn start_node(data_dir: PathBuf) -> Result<(Node, NodeInfo), String> {
         runtime: cfg!(not(any(target_os = "ios", target_os = "android"))),
         relay,
         seed_if_empty: Some(starter_path),
+        name: None,
     })
     .await
     .map_err(|e| e.to_string())?;
@@ -241,6 +354,7 @@ async fn start_node(data_dir: PathBuf) -> Result<(Node, NodeInfo), String> {
             node_id,
             workspace_id,
             me,
+            account: settings.account,
         },
     ))
 }
@@ -347,15 +461,17 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .manage(terminal::Terminals::default())
         .setup(|app| {
-            let data_dir = app.path().app_data_dir()?;
-            let (node, info) = tauri::async_runtime::block_on(start_node(data_dir))?;
+            let root = app.path().app_data_dir()?;
+            let (node, info) = tauri::async_runtime::block_on(start_node(root.clone()))?;
             let node = Arc::new(node);
             forward_events(app.handle().clone(), node.clone());
-            app.manage(AppState { node, info });
+            app.manage(AppState { node, info, root });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             node_info,
+            sign_in,
+            sign_out,
             snapshot,
             apply,
             set_presence,
@@ -379,6 +495,31 @@ mod tests {
     fn formats_rfc3339() {
         assert_eq!(super::rfc3339(0), "1970-01-01T00:00:00Z");
         assert_eq!(super::rfc3339(1_763_716_320), "2025-11-21T09:12:00Z");
+    }
+
+    #[test]
+    fn sync_urls() {
+        assert_eq!(
+            super::sync_url("https://sync.example.com").as_deref(),
+            Ok("wss://sync.example.com/v1/sync")
+        );
+        assert_eq!(
+            super::sync_url("http://127.0.0.1:8787").as_deref(),
+            Ok("ws://127.0.0.1:8787/v1/sync")
+        );
+        assert!(super::sync_url("sync.example.com").is_err());
+        assert!(super::sync_url("https://").is_err());
+    }
+
+    #[test]
+    fn signed_in_workspaces_get_their_own_store() {
+        let root = std::path::Path::new("/data");
+        assert_eq!(
+            super::workspace_dir(root, "ws-mindify").expect("dir"),
+            root.join("workspaces").join("ws-mindify")
+        );
+        assert!(super::workspace_dir(root, "../etc").is_err());
+        assert!(super::workspace_dir(root, "").is_err());
     }
 
     #[test]

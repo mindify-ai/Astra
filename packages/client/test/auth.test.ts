@@ -10,8 +10,26 @@ import {
   RelayAuth,
   type Session,
   saveSession,
+  serverBaseUrl,
   waitForApproval,
 } from '../src/auth'
+
+describe('serverBaseUrl', () => {
+  it('adds https to bare hosts and http to localhost, and drops trailing slashes', () => {
+    expect(serverBaseUrl(' sync.example.com ')).toBe('https://sync.example.com')
+    expect(serverBaseUrl('https://sync.example.com/')).toBe('https://sync.example.com')
+    expect(serverBaseUrl('https://example.com/astra/')).toBe('https://example.com/astra')
+    expect(serverBaseUrl('localhost:8787')).toBe('http://localhost:8787')
+    expect(serverBaseUrl('127.0.0.1:8787')).toBe('http://127.0.0.1:8787')
+    expect(serverBaseUrl('http://10.0.0.5:8787')).toBe('http://10.0.0.5:8787')
+  })
+
+  it('rejects what is not a web address', () => {
+    expect(serverBaseUrl('')).toBeNull()
+    expect(serverBaseUrl('ftp://x.example')).toBeNull()
+    expect(serverBaseUrl('https://')).toBeNull()
+  })
+})
 
 const code: DeviceCode = {
   deviceCode: 'dc',

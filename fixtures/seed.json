@@ -288,6 +288,22 @@
       "requiresNetwork": false
     },
     {
+      "kind": "node",
+      "id": "n-mark-desktop",
+      "name": "Mark's MacBook Pro",
+      "ownerId": "p-mark",
+      "platform": "macos",
+      "startedAt": "2026-11-21T08:30:00Z"
+    },
+    {
+      "kind": "node",
+      "id": "n-build-01",
+      "name": "build-01",
+      "ownerId": "p-mark",
+      "platform": "linux",
+      "startedAt": "2026-11-20T19:04:00Z"
+    },
+    {
       "kind": "mission",
       "id": "m-014",
       "number": 14,

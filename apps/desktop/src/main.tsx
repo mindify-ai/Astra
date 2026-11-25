@@ -1,5 +1,13 @@
-import { AstraApp, type Platform } from '@astra/app'
-import { isTauri, MockClient, starterSeed, TauriClient, tauriFiles, tauriTerminal } from '@astra/client'
+import { AstraApp, type HostAccount, type Platform } from '@astra/app'
+import {
+  isTauri,
+  MockClient,
+  RelayAuth,
+  starterSeed,
+  TauriClient,
+  tauriFiles,
+  tauriTerminal,
+} from '@astra/client'
 import { writeText } from '@tauri-apps/plugin-clipboard-manager'
 import { open } from '@tauri-apps/plugin-dialog'
 import { platform as osPlatform } from '@tauri-apps/plugin-os'
@@ -44,6 +52,15 @@ function startNode() {
   const desktop = platform !== 'ios' && platform !== 'android'
   client.ready
     .then(() => {
+      const signedIn = client.info?.account ?? null
+      // "Continue with GitHub" signs this app in to a sync server (the one it signed in to before, else the
+      // build's default), then the shell restarts on that workspace.
+      const account: HostAccount = {
+        server: signedIn?.server ?? import.meta.env.VITE_ASTRA_RELAY_URL ?? '',
+        person: signedIn?.person ?? null,
+        auth: (server) => new RelayAuth(server),
+        signIn: (server, session) => TauriClient.signIn(server, session),
+      }
       root.render(
         <StrictMode>
           <AstraApp
@@ -61,6 +78,8 @@ function startNode() {
                 return typeof picked === 'string' ? picked : null
               },
               copy: (text) => writeText(text),
+              account,
+              signOut: signedIn ? () => void TauriClient.signOut() : undefined,
               terminal: desktop ? tauriTerminal : undefined,
               files: desktop ? tauriFiles : undefined,
             }}

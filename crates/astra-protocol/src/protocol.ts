@@ -217,6 +217,16 @@ export interface AgentType {
   instructions: string
 }
 
+/** A runner node (the desktop app or astrad) that runs agents. Each node puts its own entry when it starts. */
+export interface RunnerNode {
+  kind: 'node'
+  id: string
+  name: string
+  ownerId: string
+  platform: string
+  startedAt: string
+}
+
 export type Entity =
   | Person
   | Repository
@@ -230,6 +240,7 @@ export type Entity =
   | Merge
   | Membership
   | AgentType
+  | RunnerNode
 
 export type EntityKind = Entity['kind']
 
@@ -247,6 +258,7 @@ export interface EntityByKind {
   merge: Merge
   membership: Membership
   agentType: AgentType
+  node: RunnerNode
 }
 
 export interface Presence {
@@ -271,6 +283,7 @@ export interface State {
   merges: Record<string, Merge>
   memberships: Record<string, Membership>
   agentTypes: Record<string, AgentType>
+  nodes: Record<string, RunnerNode>
   presence: Presence[]
 }
 

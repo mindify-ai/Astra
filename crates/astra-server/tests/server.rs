@@ -419,9 +419,35 @@ async fn http_endpoints() {
 
     let prod = start(ServerConfig {
         jwt_secret: Some("x".into()),
+        allowed_origins: Some(vec!["https://app.example".into()]),
         ..ServerConfig::default()
     })
     .await;
+    // CORS: the configured web origin and the desktop app's webview may call the auth endpoints; others not.
+    for (origin, allowed) in [
+        ("https://app.example", true),
+        ("tauri://localhost", true),
+        ("http://tauri.localhost", true),
+        ("https://evil.example", false),
+    ] {
+        let r = http
+            .request(
+                reqwest::Method::OPTIONS,
+                format!("{}/v1/auth/device/start", prod.http),
+            )
+            .header("origin", origin)
+            .header("access-control-request-method", "POST")
+            .header("access-control-request-headers", "content-type")
+            .send()
+            .await
+            .expect("preflight");
+        let echoed = r
+            .headers()
+            .get("access-control-allow-origin")
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_string);
+        assert_eq!(echoed.as_deref() == Some(origin), allowed, "{origin}");
+    }
     let r = http
         .post(format!("{}/v1/auth/dev-token", prod.http))
         .json(&json!({"name":"x"}))
