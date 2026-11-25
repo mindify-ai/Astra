@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 mod files;
+mod github;
 mod terminal;
 
 /// A first launch starts with only you and the catalog of agents you can connect: no demo data.
@@ -32,6 +33,16 @@ struct NodeInfo {
     me: String,
     /// The sync server the app signed in to through the device flow; `None` in a local-only workspace.
     account: Option<Account>,
+    /// The GitHub account this app signed in with directly (no sync server).
+    github: Option<GithubIdentity>,
+}
+
+/// Who signed in with GitHub from the app. Only the profile is kept; GitHub's token never is.
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GithubIdentity {
+    login: String,
+    name: String,
 }
 
 /// Who the app signed in as, and where. The relay's session token is kept in `Settings::relay_token`; the
@@ -55,6 +66,8 @@ struct Settings {
     me: Option<String>,
     /// Set by signing in from the app (`sign_in`); its workspace gets its own store under `workspaces/`.
     account: Option<Account>,
+    /// Set by signing in with GitHub directly (`github_device_poll`).
+    github: Option<GithubIdentity>,
 }
 
 /// A relay session from the device flow (`@astra/client` `Session`).
@@ -110,6 +123,49 @@ fn sign_in(
     write_settings(&state.root, &settings).map_err(|e| e.to_string())?;
     state.node.shutdown();
     app.restart()
+}
+
+/// Starts signing in with GitHub directly: a device code from GitHub, with the built-in client id.
+#[tauri::command]
+async fn github_device_start() -> Result<github::DeviceCode, String> {
+    github::start().await.map_err(str::to_string)
+}
+
+/// Polls GitHub once. On approval, you take your GitHub name in this workspace (the `person` entity you sign
+/// as), it is remembered in the settings, and a `complete` poll result is returned whose session has no
+/// token: there is no server session, and GitHub's own token has already been dropped.
+#[tauri::command]
+async fn github_device_poll(
+    state: State<'_, AppState>,
+    device_code: String,
+) -> Result<serde_json::Value, String> {
+    let profile = match github::poll(&device_code).await.map_err(str::to_string)? {
+        Ok(profile) => profile,
+        Err(unfinished) => return Ok(github::poll_json(&unfinished)),
+    };
+    let me = state.info.me.clone();
+    let person = astra_protocol::Person {
+        id: me.clone(),
+        initials: initials(&profile.name),
+        name: profile.name.clone(),
+    };
+    let op = state.node.make_op(me, astra_protocol::OpBody::put(person.clone()));
+    state.node.apply(vec![op]).await.map_err(|e| e.to_string())?;
+    let mut settings = read_settings(&state.root);
+    settings.github = Some(GithubIdentity {
+        login: profile.login,
+        name: profile.name,
+    });
+    write_settings(&state.root, &settings).map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({
+        "status": "complete",
+        "session": {
+            "token": "",
+            "workspaceId": state.info.workspace_id,
+            "person": astra_protocol::Entity::Person(person),
+            "expiresAt": "",
+        },
+    }))
 }
 
 /// Forgets the sync server session and restarts on the local-only workspace (its store is untouched).
@@ -355,6 +411,7 @@ async fn start_node(root: PathBuf) -> Result<(Node, NodeInfo), String> {
             workspace_id,
             me,
             account: settings.account,
+            github: settings.github,
         },
     ))
 }
@@ -471,6 +528,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             node_info,
+            github_device_start,
+            github_device_poll,
             sign_in,
             sign_out,
             snapshot,

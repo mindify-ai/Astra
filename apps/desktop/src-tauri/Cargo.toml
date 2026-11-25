@@ -25,6 +25,8 @@ tauri-plugin-opener = "2.7.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["sync"] }
+# Signing in with GitHub from the app (device flow; same build as the runtime's).
+reqwest = { version = "0.13", default-features = false, features = ["json", "form", "rustls"] }
 astra-protocol = { path = "../../../crates/astra-protocol" }
 
 # Phones keep a replica and sync it; only desktops run agents.
