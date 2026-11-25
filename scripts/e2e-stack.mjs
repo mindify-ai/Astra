@@ -137,7 +137,8 @@ async function main() {
     await page.goto(`${WEB}/?platform=mac`)
     await page.getByLabel('Developer name').fill('Mark')
     await page.getByRole('button', { name: 'Dev sign-in' }).click()
-    await page.getByRole('heading', { name: 'Start a mission.' }).waitFor()
+    // A new workspace has no repository yet, so it opens on Welcome, which says who signed in.
+    await page.getByText('Signed in as Mark').waitFor()
     check(true, 'signed in through the relay')
 
     const agent = (id, name, script) => ({

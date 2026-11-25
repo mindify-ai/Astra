@@ -112,4 +112,100 @@ describe('SignIn', () => {
     await flush(0)
     expect(onSignedIn.mock.calls[0]?.[0].person.name).toBe('Lin')
   })
+
+  describe('one-click redirect', () => {
+    const session: Session = {
+      token: 't',
+      workspaceId: 'ws-gh-hubot',
+      person: { kind: 'person', id: 'p-gh-hubot', name: 'Hu Bot', initials: 'HB' },
+      expiresAt: '2099-01-01T00:00:00Z',
+    }
+    const device = new MockAuth()
+
+    it('leaves for GitHub on the web, and finishes signed in when GitHub sends the browser back', async () => {
+      const redirect = vi.fn(async () => null)
+      const onSignedIn = vi.fn()
+      const { unmount } = render(
+        <SignIn auth={{ start: device.start, poll: device.poll, redirect }} onSignedIn={onSignedIn} />,
+      )
+      fireEvent.click(screen.getByRole('button', { name: 'Continue with GitHub →' }))
+      expect(redirect).toHaveBeenCalledWith('github', expect.anything())
+      expect(await screen.findByRole('button', { name: 'Opening GitHub…' })).toBeTruthy()
+      expect(screen.queryByLabelText('Your code')).toBeNull()
+      unmount()
+
+      // The page GitHub sends the browser back to.
+      const complete = vi.fn(async () => session)
+      render(
+        <SignIn
+          auth={{ start: device.start, poll: device.poll, redirect, returning: () => true, complete }}
+          onSignedIn={onSignedIn}
+          autoStart="github"
+        />,
+      )
+      expect(screen.getByText('Signing you in…')).toBeTruthy()
+      expect(await screen.findByText(/Signed in as Hu Bot/)).toBeTruthy()
+      expect(onSignedIn).toHaveBeenCalledWith(session)
+      expect(redirect).toHaveBeenCalledOnce()
+    })
+
+    it('waits for the browser on the desktop, offers to reopen GitHub, and comes back signed in', async () => {
+      let deliver: (s: Session) => void = () => {}
+      const openUrl = vi.fn()
+      const redirect = vi.fn(
+        (_p: string, opts?: { onOpened?: (url: string) => void }) =>
+          new Promise<Session>((resolve) => {
+            opts?.onOpened?.('https://github.com/login/oauth/authorize?state=s')
+            deliver = resolve
+          }),
+      )
+      const onSignedIn = vi.fn()
+      render(
+        <SignIn
+          auth={{ start: device.start, poll: device.poll, redirect }}
+          onSignedIn={onSignedIn}
+          openUrl={openUrl}
+        />,
+      )
+      fireEvent.click(screen.getByRole('button', { name: 'Continue with GitHub →' }))
+      expect(await screen.findByText('Waiting for GitHub')).toBeTruthy()
+      fireEvent.click(screen.getByRole('button', { name: 'Open GitHub again' }))
+      expect(openUrl).toHaveBeenCalledWith('https://github.com/login/oauth/authorize?state=s')
+      await act(async () => deliver(session))
+      expect(await screen.findByText(/Signed in as Hu Bot/)).toBeTruthy()
+      expect(onSignedIn).toHaveBeenCalledWith(session)
+    })
+
+    it('falls back to a code when the server only does the device flow', async () => {
+      const redirect = vi.fn(async () => {
+        throw new AuthError('redirectUnavailable')
+      })
+      render(
+        <SignIn
+          auth={{ start: device.start.bind(device), poll: device.poll.bind(device), redirect }}
+          onSignedIn={() => {}}
+        />,
+      )
+      fireEvent.click(screen.getByRole('button', { name: 'Continue with GitHub →' }))
+      expect(await screen.findByLabelText('Your code')).toHaveProperty('textContent', 'WDJB-MJHT')
+    })
+
+    it('explains a denial on the way back', async () => {
+      render(
+        <SignIn
+          auth={{
+            start: device.start,
+            poll: device.poll,
+            returning: () => true,
+            complete: async () => {
+              throw new AuthError('denied')
+            },
+          }}
+          onSignedIn={() => {}}
+        />,
+      )
+      expect((await screen.findByRole('alert')).textContent).toContain('Sign-in was cancelled on GitHub.')
+      expect(screen.getByRole('button', { name: 'Continue with GitHub →' })).toBeTruthy()
+    })
+  })
 })

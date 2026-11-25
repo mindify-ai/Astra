@@ -82,9 +82,16 @@ variable "relay_memory" {
 }
 
 variable "github_oauth_client_id" {
-  description = "GitHub OAuth app client id for device-flow sign-in (public value; empty disables GitHub sign-in)."
+  description = "GitHub OAuth app client id for sign-in (public value; empty disables GitHub sign-in). The app needs Enable Device Flow for the device-flow fallback."
   type        = string
   default     = ""
+}
+
+variable "github_oauth_client_secret" {
+  description = "GitHub OAuth app client secret: enables one-click sign-in (the redirect flow). Set the OAuth app's callback URL to https://<sync_domain>/v1/auth/redirect/callback. Kept in Secret Manager. Empty: device flow only."
+  type        = string
+  default     = ""
+  sensitive   = true
 }
 
 variable "gitlab_oauth_client_id" {

@@ -14,6 +14,13 @@ resource "google_secret_manager_secret_iam_member" "relay" {
   member    = google_service_account.relay.member
 }
 
+resource "google_secret_manager_secret_iam_member" "relay_github" {
+  count     = local.github_redirect_flow ? 1 : 0
+  secret_id = google_secret_manager_secret.github_client_secret[0].id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = google_service_account.relay.member
+}
+
 resource "google_project_iam_member" "relay" {
   for_each = toset(["roles/logging.logWriter", "roles/monitoring.metricWriter", "roles/cloudtrace.agent"])
   project  = var.project_id
@@ -87,6 +94,25 @@ resource "google_cloud_run_v2_service" "relay" {
         value = "https://${var.web_domain}"
       }
 
+      # GitHub sends sign-ins back to <this>/v1/auth/redirect/callback.
+      env {
+        name  = "ASTRA_PUBLIC_URL"
+        value = "https://${var.sync_domain}"
+      }
+
+      dynamic "env" {
+        for_each = local.github_redirect_flow ? ["GITHUB_CLIENT_SECRET"] : []
+        content {
+          name = env.value
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.github_client_secret[0].secret_id
+              version = "latest"
+            }
+          }
+        }
+      }
+
       env {
         name  = "ASTRA_LOG_FORMAT"
         value = "json"
@@ -140,6 +166,8 @@ resource "google_cloud_run_v2_service" "relay" {
 
   depends_on = [
     google_secret_manager_secret_iam_member.relay,
+    google_secret_manager_secret_iam_member.relay_github,
     google_secret_manager_secret_version.this,
+    google_secret_manager_secret_version.github_client_secret,
   ]
 }

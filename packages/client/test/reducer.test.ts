@@ -118,5 +118,9 @@ describe('hlc', () => {
   })
   it('makes 26-char ULIDs', () => {
     expect(ulid()).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/)
+    // Monotonic within a millisecond: ids made together sort in the order they were made.
+    const same = Array.from({ length: 50 }, () => ulid(1_763_716_320_000))
+    expect([...same].sort()).toEqual(same)
+    expect(new Set(same).size).toBe(50)
   })
 })

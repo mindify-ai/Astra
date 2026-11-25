@@ -18,7 +18,7 @@ const noServer: Auth = {
  * through that relay, which reopens the app on the team's workspace so teammates, the web and phones join it. Without the capability (web, tests) it goes on to choosing a repository.
  */
 export function AccountSignIn({ provider }: { provider?: Provider }) {
-  const { account, github, openUrl, copy } = useHost()
+  const { account, github, openUrl, copy, focusWindow } = useHost()
   const [server, setServer] = useState(account?.server ?? '')
   const typed = server.trim() !== ''
   const base = serverBaseUrl(server)
@@ -37,7 +37,13 @@ export function AccountSignIn({ provider }: { provider?: Provider }) {
       autoStart={auth ? provider : undefined}
       openUrl={openUrl}
       copyText={copy}
-      onSignedIn={(session) => account.signIn(local ? '' : (base ?? ''), session)}
+      // GitHub on this machine uses a code (no client secret can ship in an app): open GitHub with the code
+      // already copied, and come back to the front once it is approved.
+      openOnCode={local && openUrl !== undefined}
+      onSignedIn={(session) => {
+        focusWindow?.()
+        return account.signIn(local ? '' : (base ?? ''), session)
+      }}
       header={<AppHeader border={false} byline="BY MINDIFY AI" />}
       localAction={
         <Link to="/setup/repo" search={{ source: 'local' }} className={buttonClass('outline', 'lg')}>

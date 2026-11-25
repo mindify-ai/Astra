@@ -112,6 +112,8 @@ export interface HostCapabilities {
   copy?: (text: string) => Promise<void>
   /** Opens a web page in the default browser (the desktop webview cannot open one itself). */
   openUrl?: (url: string) => void
+  /** Brings the app's window to the front (after signing in in the browser). */
+  focusWindow?: () => void
   /** Ends the session (signed in to a relay). */
   signOut?: () => void
   /** Signs in to a sync server from inside the app (desktop app). */

@@ -1,4 +1,4 @@
-import type { Session } from './auth'
+import type { RedirectDriver, Session } from './auth'
 import type { FileEntry, FilesHost } from './files'
 import { HlcClock } from './hlc'
 import { Store } from './store'
@@ -95,6 +95,50 @@ export class TauriClient extends Store {
 
 /** True when running inside a Tauri webview. */
 export const isTauri = (): boolean => typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
+
+/**
+ * The desktop app's one-click sign-in to a sync server: GitHub opens in the system browser (`openUrl`), and the
+ * relay sends the browser back to a loopback port the Rust shell listens on (RFC 8252), which hands the result
+ * to the webview and brings the window to the front.
+ */
+export function tauriLoopback(openUrl: (url: string) => void): RedirectDriver {
+  return {
+    async prepare(signal) {
+      const [{ invoke }, { listen }] = await Promise.all([
+        import('@tauri-apps/api/core'),
+        import('@tauri-apps/api/event'),
+      ])
+      let port: number | null = null
+      const early: { port: number; query: string }[] = []
+      let deliver: (q: URLSearchParams) => void = () => {}
+      const wait = new Promise<URLSearchParams>((resolve) => {
+        deliver = resolve
+      })
+      // Listen first; the result can only come after the browser opens, but a listener costs nothing.
+      const unlisten = await listen<{ port: number; query: string }>('astra://oauth', (e) => {
+        if (port === null) early.push(e.payload)
+        else if (e.payload.port === port) {
+          unlisten()
+          deliver(new URLSearchParams(e.payload.query))
+        }
+      })
+      signal?.addEventListener('abort', () => unlisten(), { once: true })
+      try {
+        port = await invoke<number>('oauth_loopback')
+      } catch (err) {
+        unlisten()
+        throw err
+      }
+      const mine = early.find((x) => x.port === port)
+      if (mine) {
+        unlisten()
+        deliver(new URLSearchParams(mine.query))
+      }
+      return { redirectUri: `http://127.0.0.1:${port}/callback`, wait }
+    },
+    open: openUrl,
+  }
+}
 
 /** The desktop app's terminal: a login shell in a pseudo-terminal, run by the Rust shell. */
 export const tauriTerminal: TerminalHost = {

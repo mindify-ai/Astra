@@ -51,10 +51,15 @@ connects the agent with its own keys. A mission runs on the node of its first en
 **Desktop sign-in.** _Continue with GitHub_ on Welcome (or _Sign in to sync_) has two routes:
 
 - **No sync server** (the default): the app runs GitHub's device flow itself, with its built-in OAuth client id
-  (public; no client secret is used or shipped). You take your GitHub name in the local workspace, and GitHub's
+  (public; no client secret is used or shipped, which rules out GitHub's redirect flow here). It opens GitHub with
+  the code copied and brings the window back to the front once you approve. You take your GitHub name in the local workspace, and GitHub's
   token goes to the OS keychain so the Repo screen can list your repositories and clone one into `~/Astra` in one
   click. The token is passed to `git` through environment config only, never written to the clone or synced.
-- **A sync server address**: the relay's device flow, then the node restarts on that workspace in its own store.
+- **A sync server address**: the relay's redirect flow. GitHub opens in the default browser; the relay sends the
+  browser back to a loopback port the Rust shell listens on (RFC 8252), which hands the one-time code to the
+  webview and brings the window to the front. The webview trades it, with its PKCE verifier, for a session. The
+  node then restarts on that workspace in its own store. A relay without a client secret falls back to its device
+  flow.
 
 ## Repository
 
@@ -137,7 +142,7 @@ connects the agent with its own keys. A mission runs on the node of its first en
   app's GitHub token (scopes `repo read:user`), used only to list and clone your repositories.
 - **Agent sandboxing.** Agent file access is confined to its worktree, and commands follow the approval policy.
 - **Tauri.** The webview's capabilities are limited to window controls, the OS info read, the folder picker,
-  clipboard writes and opening `https://github.com/*` pages in the default browser (for sign-in). Files, processes and the network go through the Rust core.
-- **Relay.** The relay authenticates with JWT (GitHub OAuth device flow, from the web or the desktop app; the relay also speaks GitLab, which the apps don't offer for now)
+  clipboard writes, bringing its window to the front, and opening `https://github.com/*` pages in the default browser (for sign-in). Files, processes and the network go through the Rust core.
+- **Relay.** The relay authenticates with JWT (GitHub OAuth redirect flow, or the device flow without a client secret, from the web or the desktop app; the relay also speaks GitLab's device flow, which the apps don't offer for now). It keeps the OAuth client secret, sends browsers back only to allowed origins or loopback, and hands out a one-time code that only the app holding the PKCE verifier can trade in
   and enforces workspace membership. It stores ops (messages, diffs, statuses), not repositories.
 - **LAN pairing.** It uses a one-time code from a QR scan.

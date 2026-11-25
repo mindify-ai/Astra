@@ -16,6 +16,14 @@ export * from './reducer'
 export { RemoteClient, type RemoteOptions } from './remote'
 export { demoSeed, starterSeed } from './seed'
 export * from './store'
-export { type DesktopAccount, isTauri, type NodeInfo, TauriClient, tauriFiles, tauriTerminal } from './tauri'
+export {
+  type DesktopAccount,
+  isTauri,
+  type NodeInfo,
+  TauriClient,
+  tauriFiles,
+  tauriLoopback,
+  tauriTerminal,
+} from './tauri'
 export type { TerminalHost, TerminalOpenOptions, TerminalSession } from './terminal'
 export * from './types'

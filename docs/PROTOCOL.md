@@ -166,26 +166,41 @@ holds shared cases that both implementations must pass.
 
 ## Auth (relay HTTP API)
 
-JSON, camelCase. The relay proxies the GitHub/GitLab OAuth **device flow**, because the providers' device
-endpoints don't allow browser CORS. The provider's access token is used once to read the profile and then
-discarded.
+JSON, camelCase. The relay runs GitHub's OAuth **redirect flow** (it keeps the client secret) and proxies the
+GitHub/GitLab **device flow**, because the providers' device endpoints don't allow browser CORS. The provider's
+access token is used once to read the profile and then discarded.
 
-| Request                                                           | Response                                                                                                                                                                                                         |
-| ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `POST /v1/auth/device/start` `{provider: github\|gitlab}`         | `200 {deviceCode, userCode, verificationUri, verificationUriComplete: string\|null, interval, expiresIn}`; `503 {error: "notConfigured" \| "deviceFlowDisabled" \| "badClientId"}`; `400 {error: "badProvider"}` |
-| `POST /v1/auth/device/poll` `{provider, deviceCode}`              | `200 {status: "pending"}` \| `{status: "slowDown", interval}` \| `{status: "expired"}` \| `{status: "denied"}` \| `{status: "complete", session}`; the same `503`s as start                                      |
-| `POST /v1/auth/dev-token` `{name}` (only with `ASTRA_DEV_AUTH=1`) | `200 {session}`                                                                                                                                                                                                  |
-| `GET /v1/me` (bearer token)                                       | `200 {person, workspaceId}`; `401 {error: "unauthorized"}`                                                                                                                                                       |
+| Request                                                                  | Response                                                                                                                                                                                                         |
+| ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /v1/auth/device/start` `{provider: github\|gitlab}`                | `200 {deviceCode, userCode, verificationUri, verificationUriComplete: string\|null, interval, expiresIn}`; `503 {error: "notConfigured" \| "deviceFlowDisabled" \| "badClientId"}`; `400 {error: "badProvider"}` |
+| `POST /v1/auth/device/poll` `{provider, deviceCode}`                     | `200 {status: "pending"}` \| `{status: "slowDown", interval}` \| `{status: "expired"}` \| `{status: "denied"}` \| `{status: "complete", session}`; the same `503`s as start                                      |
+| `POST /v1/auth/redirect/start` `{provider: github, redirect, challenge}` | `200 {url}` (GitHub's authorize page); `503 {error: "notConfigured" \| "redirectNotConfigured"}`; `400 {error: "badProvider" \| "badRedirect" \| "badChallenge"}`                                                |
+| `GET /v1/auth/redirect/callback?code&state` (GitHub's redirect)          | `303` to `redirect` with `astraCode=<one-time code>`, or `authError=denied\|expired\|notConfigured\|badClientId\|network\|server`; `400` page for a missing, forged or expired `state` (never redirects)         |
+| `POST /v1/auth/redirect/exchange` `{code, verifier}`                     | `200 {session}`; `400 {error: "invalidCode"}` (unknown, used, expired, or the wrong verifier)                                                                                                                    |
+| `POST /v1/auth/dev-token` `{name}` (only with `ASTRA_DEV_AUTH=1`)        | `200 {session}`                                                                                                                                                                                                  |
+| `GET /v1/me` (bearer token)                                              | `200 {person, workspaceId}`; `401 {error: "unauthorized"}`                                                                                                                                                       |
 
 - `notConfigured`: no client id for that provider. `deviceFlowDisabled` and `badClientId` mean the OAuth app is set
   up wrong (device flow not enabled; a client id the provider doesn't know, which GitHub answers with `404`); the
   relay logs them as errors. A device code the provider doesn't recognise polls as `expired`.
+- **Redirect flow.** The app makes a PKCE pair (RFC 7636, `S256`: `challenge` = base64url(SHA-256(`verifier`)))
+  and calls `start` with the address to come back to. `redirect` must be on an `ASTRA_ALLOWED_ORIGINS` origin (any
+  origin in dev auth mode when that is unset) or a loopback `http://127.0.0.1|localhost|[::1]:<port>` (the desktop
+  app, RFC 8252). The relay signs a `state` (HS256 with the JWT secret, audience `astra-oauth-state`, 10 minutes)
+  holding `redirect`, `challenge` and the callback URL, and returns GitHub's authorize URL. GitHub sends the
+  browser to `<ASTRA_PUBLIC_URL or the request's host>/v1/auth/redirect/callback`; the relay trades GitHub's code
+  with the client secret, signs the person in as the device flow does, and sends the browser to `redirect` with a
+  one-time `astraCode` (two minutes, in memory, one attempt). The app trades it in with `verifier`. Neither
+  GitHub's code nor its token reaches the app, and the code is useless without the verifier.
+- `redirectNotConfigured`: a client id but no `GITHUB_CLIENT_SECRET` (or GitLab, which has no redirect flow
+  here); apps then use the device flow.
 - The web and desktop apps offer GitHub only for now; the relay still accepts `gitlab`.
 - `Session` = `{token, workspaceId, person: Person, expiresAt}`.
 - `token` is an HS256 JWT (`sub` = personId, `ws` = workspaceId, 30-day expiry).
 - On first sign-in the relay writes the person entity into the workspace op log.
 
-**Desktop sign-in.** The desktop app runs the same device flow from its webview, so the relay always allows the
+**Desktop sign-in.** The desktop app runs the same redirect flow from its webview, coming back through a loopback
+listener in the Rust shell (or the device flow when the relay has no client secret), so the relay always allows the
 Tauri origins (`tauri://localhost`, `http://tauri.localhost`, `https://tauri.localhost`) besides
 `ASTRA_ALLOWED_ORIGINS`. The shell then keeps the session (the Astra token only) in its local settings and
 restarts its node on the session's workspace. That workspace gets its own store, under `workspaces/<workspaceId>`

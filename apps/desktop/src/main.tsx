@@ -7,8 +7,10 @@ import {
   TauriClient,
   tauriFiles,
   tauriGithub,
+  tauriLoopback,
   tauriTerminal,
 } from '@astra/client'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 import { writeText } from '@tauri-apps/plugin-clipboard-manager'
 import { open } from '@tauri-apps/plugin-dialog'
 import { openUrl } from '@tauri-apps/plugin-opener'
@@ -60,7 +62,13 @@ function startNode() {
       const account: HostAccount = {
         server: signedIn?.server ?? import.meta.env.VITE_ASTRA_RELAY_URL ?? '',
         person: signedIn?.person ?? null,
-        auth: (server) => new RelayAuth(server),
+        // One click: GitHub in the system browser, then back to this window through a loopback port.
+        auth: (server) =>
+          new RelayAuth(
+            server,
+            undefined,
+            tauriLoopback((url) => void openUrl(url)),
+          ),
         signIn: async (server, session) => {
           if (server) return TauriClient.signIn(server, session)
           // Signed in with GitHub on this machine: reopen on your repositories, with the account loaded.
@@ -88,6 +96,14 @@ function startNode() {
               },
               copy: (text) => writeText(text),
               openUrl: (url) => void openUrl(url),
+              focusWindow: () => {
+                const w = getCurrentWindow()
+                void w
+                  .unminimize()
+                  .then(() => w.show())
+                  .then(() => w.setFocus())
+                  .catch(() => {})
+              },
               account,
               github,
               signOut: signedIn ? () => void TauriClient.signOut() : undefined,
