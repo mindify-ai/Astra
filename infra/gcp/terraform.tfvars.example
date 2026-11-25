@@ -7,4 +7,7 @@ sync_domain = "sync.example.com"
 # dns_zone_name          = "example-com"
 # github_repository      = "mindify-ai/Astra"
 # github_oauth_client_id = "Iv1.xxxxxxxx"
+# One-click sign-in: the OAuth app's secret, and its callback URL set to https://<sync_domain>/v1/auth/redirect/callback.
+# Better passed as TF_VAR_github_oauth_client_secret than written here.
+# github_oauth_client_secret = "…"
 # db_high_availability   = true

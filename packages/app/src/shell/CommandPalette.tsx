@@ -177,6 +177,39 @@ export function CommandPalette() {
         keywords: 'shell console',
         run: () => ui.setTerminalOpen(!ui.terminalOpen),
       })
+    out.push({
+      id: 'browser',
+      group: 'Actions',
+      label: 'Open browser',
+      keywords: 'preview localhost web page workbench layout',
+      run: () => {
+        ui.setLayout((l) => ({ ...l, browser: { ...l.browser, open: true } }))
+        go('/code')()
+      },
+    })
+    if (cm)
+      out.push(
+        {
+          id: 'side',
+          group: 'Actions',
+          label: `Side chat · ${cm.title}`,
+          keywords: 'btw question ask aside',
+          run: () => {
+            ui.setSideOpen(true)
+            go('/missions/$missionId', { missionId: cm.id })()
+          },
+        },
+        {
+          id: 'workbench-chat',
+          group: 'Actions',
+          label: 'Code with the chat beside it',
+          keywords: 'layout workbench split thread editor',
+          run: () => {
+            ui.setLayout((l) => ({ ...l, chat: { ...l.chat, open: true } }))
+            go('/code')()
+          },
+        },
+      )
     if (cm && features.share)
       out.push({
         id: 'share',

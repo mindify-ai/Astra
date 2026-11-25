@@ -43,6 +43,10 @@ export type AuthErrorCode =
   | 'expired'
   | 'denied'
   | 'cancelled'
+  /** The server can't do the one-click redirect sign-in (no client secret): use the device flow instead. */
+  | 'redirectUnavailable'
+  /** The server refused to send the browser back to this app's address (not an allowed origin). */
+  | 'badRedirect'
 
 export class AuthError extends Error {
   constructor(
@@ -54,11 +58,73 @@ export class AuthError extends Error {
   }
 }
 
+export interface RedirectOptions {
+  signal?: AbortSignal
+  /** Called with the provider's page once it is open elsewhere (the system browser), to offer reopening it. */
+  onOpened?: (url: string) => void
+}
+
 /** What the sign-in screen needs; implemented by the real relay client and by a mock for demos and tests. */
 export interface Auth {
   start(provider: Provider): Promise<DeviceCode>
   poll(provider: Provider, deviceCode: string): Promise<PollResult>
   devToken?(name: string): Promise<Session>
+  /**
+   * One-click sign-in: opens the provider's sign-in page and comes back here. Resolves with the session when
+   * the result returns to this page (the desktop app), or null when this page navigates away and the result
+   * arrives on reload (the web; see `complete`). Rejects with `redirectUnavailable` when only the device flow
+   * works.
+   */
+  redirect?(provider: Provider, opts?: RedirectOptions): Promise<Session | null>
+  /** True when this page load is the provider sending the browser back (the web). */
+  returning?(): boolean
+  /** Finishes a sign-in the provider sent the browser back from; null when this load is not one. */
+  complete?(): Promise<Session | null>
+}
+
+/**
+ * How the browser gets to the provider and back. `prepare` picks the address the relay returns to; `wait` is
+ * null when that address is this page itself (the web reloads into `complete`), or resolves with its query when
+ * something else receives it (the desktop app's loopback listener).
+ */
+export interface RedirectDriver {
+  prepare(signal?: AbortSignal): Promise<{ redirectUri: string; wait: Promise<URLSearchParams> | null }>
+  open(url: string): void
+}
+
+const RESULT_PARAMS = ['astraCode', 'authError'] as const
+const PENDING_KEY = 'astra.oauth.pending'
+
+/** The web app's driver: leave for the provider in this tab, and come back to this page. */
+export const browserRedirect: RedirectDriver = {
+  prepare: async () => ({ redirectUri: `${location.origin}${location.pathname}`, wait: null }),
+  open: (url) => location.assign(url),
+}
+
+const base64url = (bytes: Uint8Array) =>
+  btoa(String.fromCharCode(...bytes))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '')
+
+/** A PKCE verifier (32 random bytes) and its S256 challenge. */
+export async function pkcePair(): Promise<{ verifier: string; challenge: string }> {
+  const verifier = base64url(crypto.getRandomValues(new Uint8Array(32)))
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier))
+  return { verifier, challenge: base64url(new Uint8Array(digest)) }
+}
+
+const resultError = (code: string): AuthError => {
+  switch (code) {
+    case 'denied':
+    case 'expired':
+    case 'notConfigured':
+    case 'badClientId':
+    case 'network':
+      return new AuthError(code)
+    default:
+      return new AuthError('server', `The sync server reported ${code}.`)
+  }
 }
 
 type Fetch = typeof fetch
@@ -82,10 +148,16 @@ export function serverBaseUrl(input: string): string | null {
 }
 
 export class RelayAuth implements Auth {
+  /** One-click sign-in; present only with a redirect driver. */
+  readonly redirect?: (provider: Provider, opts?: RedirectOptions) => Promise<Session | null>
+
   constructor(
     private readonly relayUrl: string,
     private readonly fetchImpl: Fetch = (...args) => fetch(...args),
-  ) {}
+    driver?: RedirectDriver,
+  ) {
+    if (driver) this.redirect = (provider, opts) => this.runRedirect(driver, provider, opts)
+  }
 
   private async post<T>(path: string, body: unknown): Promise<T> {
     let res: Response
@@ -103,6 +175,10 @@ export class RelayAuth implements Auth {
     if (res.status === 503 && json.error === 'deviceFlowDisabled') throw new AuthError('deviceFlowDisabled')
     if (res.status === 503 && json.error === 'badClientId') throw new AuthError('badClientId')
     if (res.status === 400 && json.error === 'badProvider') throw new AuthError('badProvider')
+    if (res.status === 503 && json.error === 'redirectNotConfigured')
+      throw new AuthError('redirectUnavailable')
+    if (res.status === 400 && json.error === 'badRedirect') throw new AuthError('badRedirect')
+    if (res.status === 400 && json.error === 'invalidCode') throw new AuthError('expired')
     if (!res.ok) throw new AuthError('server', `The sync server answered ${res.status}.`)
     return json as T
   }
@@ -118,7 +194,81 @@ export class RelayAuth implements Auth {
   async devToken(name: string) {
     return (await this.post<{ session: Session }>('/v1/auth/dev-token', { name })).session
   }
+
+  private async exchange(params: URLSearchParams, verifier: string | null): Promise<Session> {
+    const error = params.get('authError')
+    if (error) throw resultError(error)
+    const code = params.get('astraCode')
+    if (!code || !verifier) throw new AuthError('expired')
+    return (await this.post<{ session: Session }>('/v1/auth/redirect/exchange', { code, verifier })).session
+  }
+
+  private async runRedirect(
+    driver: RedirectDriver,
+    provider: Provider,
+    opts: RedirectOptions = {},
+  ): Promise<Session | null> {
+    const { verifier, challenge } = await pkcePair()
+    const target = await driver.prepare(opts.signal)
+    const { url } = await this.post<{ url: string }>('/v1/auth/redirect/start', {
+      provider,
+      redirect: target.redirectUri,
+      challenge,
+    })
+    if (opts.signal?.aborted) throw new AuthError('cancelled')
+    if (!target.wait) {
+      // This page is about to be replaced: keep the verifier for the page the provider sends the browser back to.
+      try {
+        sessionStorage.setItem(PENDING_KEY, JSON.stringify({ relayUrl: this.relayUrl, verifier }))
+      } catch {
+        /* storage blocked: the sign-in can't finish on return, and says so */
+      }
+      driver.open(url)
+      return null
+    }
+    driver.open(url)
+    opts.onOpened?.(url)
+    const params = await abortable(target.wait, opts.signal)
+    return this.exchange(params, verifier)
+  }
+
+  returning(): boolean {
+    if (typeof location === 'undefined') return false
+    const q = new URLSearchParams(location.search)
+    return RESULT_PARAMS.some((k) => q.has(k))
+  }
+
+  async complete(): Promise<Session | null> {
+    if (!this.returning()) return null
+    const params = new URLSearchParams(location.search)
+    // Take the result out of the address bar so a reload or a shared link doesn't replay it.
+    const clean = new URL(location.href)
+    for (const k of RESULT_PARAMS) clean.searchParams.delete(k)
+    history.replaceState(history.state, '', clean.toString())
+    let verifier: string | null = null
+    try {
+      const pending = JSON.parse(sessionStorage.getItem(PENDING_KEY) ?? 'null') as {
+        relayUrl?: string
+        verifier?: string
+      } | null
+      sessionStorage.removeItem(PENDING_KEY)
+      if (pending?.relayUrl === this.relayUrl && typeof pending.verifier === 'string')
+        verifier = pending.verifier
+    } catch {
+      /* nothing kept */
+    }
+    return this.exchange(params, verifier)
+  }
 }
+
+const abortable = <T>(p: Promise<T>, signal?: AbortSignal): Promise<T> =>
+  !signal
+    ? p
+    : new Promise<T>((resolve, reject) => {
+        if (signal.aborted) return reject(new AuthError('cancelled'))
+        signal.addEventListener('abort', () => reject(new AuthError('cancelled')), { once: true })
+        p.then(resolve, reject)
+      })
 
 const sleepFor = (ms: number, signal?: AbortSignal) =>
   new Promise<void>((resolve, reject) => {

@@ -13,6 +13,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 mod files;
 mod github;
+mod loopback;
 mod terminal;
 
 /// A first launch starts with only you and the catalog of agents you can connect: no demo data.
@@ -638,6 +639,25 @@ fn login_shell_path() -> Option<String> {
     (!path.is_empty()).then(|| path.to_string())
 }
 
+/// One-click sign-in to a sync server: listens on a free loopback port for the relay to send the browser back
+/// (`http://127.0.0.1:<port>/callback`). When it does, the query goes to the webview as `astra://oauth`
+/// (`{port, query}`) and the Astra window comes back to the front. Gives up after ten minutes.
+#[tauri::command]
+fn oauth_loopback(app: AppHandle) -> Result<u16, String> {
+    loopback::listen(std::time::Duration::from_secs(600), move |port, query| {
+        let _ = app.emit(
+            "astra://oauth",
+            serde_json::json!({ "port": port, "query": query }),
+        );
+        if let Some(w) = app.get_webview_window("main") {
+            let _ = w.unminimize();
+            let _ = w.show();
+            let _ = w.set_focus();
+        }
+    })
+    .map_err(|e| format!("could not listen for the sign-in to finish: {e}"))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[cfg(all(unix, not(any(target_os = "ios", target_os = "android"))))]
@@ -663,6 +683,7 @@ pub fn run() {
             github_repos,
             github_clone,
             github_sign_out,
+            oauth_loopback,
             sign_in,
             sign_out,
             snapshot,

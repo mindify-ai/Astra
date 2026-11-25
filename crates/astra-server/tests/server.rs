@@ -765,3 +765,190 @@ async fn github_oauth_app_misconfiguration_is_reported() {
         }
     }
 }
+
+#[tokio::test]
+async fn github_redirect_flow_round_trip() {
+    use wiremock::matchers::{body_string_contains, header, method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+    let gh = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/login/oauth/access_token"))
+        .and(body_string_contains("client_secret=gh-secret"))
+        .and(body_string_contains("code=good"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(
+            json!({"access_token": "gho_redirect", "token_type": "bearer", "scope": "read:user"}),
+        ))
+        .mount(&gh)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/login/oauth/access_token"))
+        .and(body_string_contains("code=used"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"error": "bad_verification_code"})),
+        )
+        .mount(&gh)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/user"))
+        .and(header("authorization", "Bearer gho_redirect"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"login": "Hubot", "name": "Hu Bot"})),
+        )
+        .mount(&gh)
+        .await;
+
+    let mut config = dev_config();
+    config.dev_auth = false;
+    config.allowed_origins = Some(vec!["https://app.example.com".into()]);
+    config.providers.github_client_id = Some("gh-client".into());
+    config.providers.github_oauth_base = gh.uri();
+    config.providers.github_api_base = gh.uri();
+    let s = start(config.clone()).await;
+    // The browser's part: follow nothing automatically, so each hop can be checked.
+    let http = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .expect("client");
+    let verifier = astra_server::auth::random_token(32);
+    let challenge = astra_server::auth::pkce_challenge(&verifier);
+    let begin = |redirect: &str, challenge: &str| {
+        http.post(format!("{}/v1/auth/redirect/start", s.http))
+            .json(&json!({"provider": "github", "redirect": redirect, "challenge": challenge}))
+            .send()
+    };
+
+    // No client secret: the app falls back to the device flow.
+    let r = begin("https://app.example.com/", &challenge)
+        .await
+        .expect("start");
+    assert_eq!(r.status(), 503);
+    assert_eq!(
+        r.json::<Value>().await.expect("json")["error"],
+        "redirectNotConfigured"
+    );
+    drop(s);
+
+    config.providers.github_client_secret = Some("gh-secret".into());
+    let s = start(config).await;
+    let begin = |redirect: &str, challenge: &str| {
+        http.post(format!("{}/v1/auth/redirect/start", s.http))
+            .json(&json!({"provider": "github", "redirect": redirect, "challenge": challenge}))
+            .send()
+    };
+    for (redirect, ch, want) in [
+        (
+            "https://evil.example.com/",
+            challenge.as_str(),
+            "badRedirect",
+        ),
+        ("https://app.example.com/", "short", "badChallenge"),
+    ] {
+        let r = begin(redirect, ch).await.expect("start");
+        assert_eq!(r.status(), 400);
+        assert_eq!(r.json::<Value>().await.expect("json")["error"], want);
+    }
+
+    // 1. The app asks for GitHub's authorize page.
+    let r = begin("https://app.example.com/?from=welcome", &challenge)
+        .await
+        .expect("start");
+    assert_eq!(r.status(), 200);
+    let authorize = url::Url::parse(
+        r.json::<Value>().await.expect("json")["url"]
+            .as_str()
+            .expect("url"),
+    )
+    .expect("authorize url");
+    assert_eq!(authorize.path(), "/login/oauth/authorize");
+    let q: std::collections::HashMap<_, _> = authorize.query_pairs().into_owned().collect();
+    assert_eq!(q["client_id"], "gh-client");
+    assert_eq!(
+        q["redirect_uri"],
+        format!("{}/v1/auth/redirect/callback", s.http)
+    );
+    let state = q["state"].clone();
+
+    // 2. GitHub sends the browser to the relay's callback; the relay sends it on to the app.
+    let callback = |query: String| {
+        http.get(format!("{}/v1/auth/redirect/callback?{query}", s.http))
+            .send()
+    };
+    let r = callback(format!("code=good&state={state}"))
+        .await
+        .expect("callback");
+    assert_eq!(r.status(), 303);
+    assert_eq!(r.headers()["cache-control"], "no-store");
+    let back = url::Url::parse(r.headers()["location"].to_str().expect("location")).expect("back");
+    assert_eq!(
+        back.origin().ascii_serialization(),
+        "https://app.example.com"
+    );
+    let params: std::collections::HashMap<_, _> = back.query_pairs().into_owned().collect();
+    assert_eq!(params["from"], "welcome", "the app's own query survives");
+    let code = params["astraCode"].clone();
+    assert!(!back.as_str().contains("gho_redirect") && !back.as_str().contains("code=good"));
+
+    // 3. The app trades the code in, with its verifier. Someone with the code alone gets nothing.
+    let exchange = |code: &str, verifier: &str| {
+        http.post(format!("{}/v1/auth/redirect/exchange", s.http))
+            .json(&json!({"code": code, "verifier": verifier}))
+            .send()
+    };
+    let r = exchange(&code, &verifier).await.expect("exchange");
+    assert_eq!(r.status(), 200);
+    let session = r.json::<Value>().await.expect("json")["session"].clone();
+    assert_eq!(session["workspaceId"], "ws-gh-hubot");
+    assert_eq!(session["person"]["name"], "Hu Bot");
+    let me: Value = http
+        .get(format!("{}/v1/me", s.http))
+        .bearer_auth(session["token"].as_str().expect("token"))
+        .send()
+        .await
+        .expect("me")
+        .json()
+        .await
+        .expect("json");
+    assert_eq!(me["person"]["id"], "p-gh-hubot");
+    let r = exchange(&code, &verifier).await.expect("again");
+    assert_eq!(r.status(), 400, "a code works once");
+
+    let r = callback(format!("code=good&state={state}"))
+        .await
+        .expect("callback");
+    let back = url::Url::parse(r.headers()["location"].to_str().expect("location")).expect("back");
+    let stolen = back
+        .query_pairs()
+        .find(|(k, _)| k == "astraCode")
+        .expect("code")
+        .1
+        .into_owned();
+    let r = exchange(&stolen, &astra_server::auth::random_token(32))
+        .await
+        .expect("stolen");
+    assert_eq!(r.status(), 400, "a code without its verifier is refused");
+
+    // Denied on GitHub, a used code, and a forged state.
+    for (query, want) in [
+        (format!("error=access_denied&state={state}"), "denied"),
+        (format!("code=used&state={state}"), "expired"),
+    ] {
+        let r = callback(query).await.expect("callback");
+        let back =
+            url::Url::parse(r.headers()["location"].to_str().expect("location")).expect("back");
+        assert_eq!(
+            back.query_pairs()
+                .find(|(k, _)| k == "authError")
+                .expect("error")
+                .1,
+            want
+        );
+    }
+    let r = callback("code=good&state=forged".into())
+        .await
+        .expect("callback");
+    assert_eq!(r.status(), 400);
+    assert!(
+        r.headers().get("location").is_none(),
+        "a forged state never redirects"
+    );
+}

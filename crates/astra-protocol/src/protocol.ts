@@ -158,6 +158,8 @@ export interface Message {
   log: LogLine[]
   approvalId: string | null
   at: string
+  /** The side thread (`side-<ulid>`); null for the main thread. */
+  side: string | null
 }
 
 export interface Approval {
@@ -304,7 +306,7 @@ export type Command =
   | { type: 'startMission'; missionId: string }
   | { type: 'approve'; approvalId: string }
   | { type: 'deny'; approvalId: string }
-  | { type: 'sendMessage'; missionId: string; to: string | null; body: string }
+  | { type: 'sendMessage'; missionId: string; to: string | null; body: string; side: string | null }
   | { type: 'takeSteering'; missionAgentId: string }
   | { type: 'releaseSteering'; missionAgentId: string }
   | { type: 'pause'; missionAgentId: string }

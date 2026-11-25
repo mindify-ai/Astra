@@ -135,21 +135,28 @@ describe('code editor', () => {
     expect(within(tree).queryByRole('treeitem', { name: 'deep.rs' })).toBeNull()
   })
 
+  // The workbench's chat pane has tabs of its own; these are the open-file tabs.
+  const fileTabs = () => within(screen.getByRole('tablist', { name: 'Open files' }))
+
   it('closes tabs, asking before it discards edits', async () => {
     const files = spyFiles({ 'a.ts': 'a', 'b.ts': 'b' })
     mount({ files })
     const user = userEvent.setup()
     await user.click(await screen.findByRole('treeitem', { name: 'a.ts' }))
     await user.click(screen.getByRole('treeitem', { name: 'b.ts' }))
-    expect(screen.getAllByRole('tab')).toHaveLength(2)
+    expect(fileTabs().getAllByRole('tab')).toHaveLength(2)
     await typeAtEnd(await editorFor('b.ts'), '!')
     await user.click(screen.getByRole('button', { name: 'Close b.ts' }))
-    expect(screen.getAllByRole('tab')).toHaveLength(2)
+    expect(fileTabs().getAllByRole('tab')).toHaveLength(2)
     await user.click(screen.getByRole('button', { name: 'Discard changes to b.ts' }))
-    expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual(['a.ts'])
+    expect(
+      fileTabs()
+        .getAllByRole('tab')
+        .map((t) => t.textContent),
+    ).toEqual(['a.ts'])
     expect(textOf(await editorFor('a.ts'))).toBe('a')
     await user.click(screen.getByRole('button', { name: 'Close a.ts' }))
-    expect(screen.queryAllByRole('tab')).toHaveLength(0)
+    expect(fileTabs().queryAllByRole('tab')).toHaveLength(0)
     expect(screen.getByText('Open a file from the explorer.')).toBeTruthy()
   })
 

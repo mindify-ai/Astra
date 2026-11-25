@@ -35,6 +35,10 @@ struct Cli {
     dev_auth: bool,
     #[arg(long, env = "GITHUB_CLIENT_ID")]
     github_client_id: Option<String>,
+    /// The GitHub OAuth app's client secret: enables one-click sign-in (the redirect flow). Without it the apps
+    /// use the device flow.
+    #[arg(long, env = "GITHUB_CLIENT_SECRET", hide_env_values = true)]
+    github_client_secret: Option<String>,
     #[arg(long, env = "GITLAB_CLIENT_ID")]
     gitlab_client_id: Option<String>,
     #[arg(
@@ -54,6 +58,10 @@ struct Cli {
     /// Comma-separated CORS origins.
     #[arg(long, env = "ASTRA_ALLOWED_ORIGINS")]
     allowed_origins: Option<String>,
+    /// The relay's public URL (`https://sync.example.com`), for the GitHub callback
+    /// (`<url>/v1/auth/redirect/callback`). Unset: taken from each request's host.
+    #[arg(long, env = "ASTRA_PUBLIC_URL")]
+    public_url: Option<String>,
     #[arg(long, env = "ASTRA_RATE_LIMIT_PER_MIN", default_value_t = 600)]
     rate_limit_per_min: u32,
     /// `json` for JSON logs (Cloud Logging).
@@ -86,6 +94,7 @@ async fn main() -> anyhow::Result<()> {
         dev_auth: cli.dev_auth,
         providers: Providers {
             github_client_id: cli.github_client_id,
+            github_client_secret: cli.github_client_secret,
             gitlab_client_id: cli.gitlab_client_id,
             github_oauth_base: cli.github_oauth_base.trim_end_matches('/').into(),
             github_api_base: cli.github_api_base.trim_end_matches('/').into(),
@@ -98,6 +107,7 @@ async fn main() -> anyhow::Result<()> {
                 .collect()
         }),
         rate_limit_per_min: cli.rate_limit_per_min,
+        public_url: cli.public_url,
         ..ServerConfig::default()
     };
     let bind = config.bind;

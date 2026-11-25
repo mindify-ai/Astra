@@ -294,6 +294,9 @@ pub struct Message {
     pub log: Vec<LogLine>,
     pub approval_id: Option<String>,
     pub at: String,
+    /// The side thread it belongs to (`side-<ulid>`, chosen by the client); null for the main thread.
+    #[serde(default)]
+    pub side: Option<String>,
 }
 
 /// An approval request raised by an agent.

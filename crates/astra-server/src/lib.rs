@@ -43,6 +43,8 @@ pub struct ServerConfig {
     /// `None` = no CORS origins (or `*` in dev auth mode); `Some(list)` = exactly these.
     pub allowed_origins: Option<Vec<String>>,
     pub rate_limit_per_min: u32,
+    /// The relay's public base URL (`ASTRA_PUBLIC_URL`), for the OAuth callback; else taken from the request.
+    pub public_url: Option<String>,
     /// WebSocket ping interval.
     pub ping_interval: Duration,
 }
@@ -58,6 +60,7 @@ impl Default for ServerConfig {
             providers: Providers::default(),
             allowed_origins: None,
             rate_limit_per_min: 600,
+            public_url: None,
             ping_interval: Duration::from_secs(25),
         }
     }
@@ -90,6 +93,8 @@ pub struct AppState {
     pub http: reqwest::Client,
     pub shutdown: watch::Receiver<bool>,
     pub limiter: Arc<ratelimit::Limiter>,
+    /// Redirect-flow one-time codes waiting to be traded in.
+    pub oauth: Arc<auth::PendingCodes>,
 }
 
 /// Build the state: connect + migrate Postgres (or fall back to memory), set up auth.
@@ -151,6 +156,7 @@ pub async fn build_state(
         http,
         shutdown,
         limiter,
+        oauth: Arc::new(auth::PendingCodes::default()),
     })
 }
 
@@ -205,6 +211,9 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/auth/dev-token", post(auth::dev_token))
         .route("/v1/auth/device/start", post(auth::device_start))
         .route("/v1/auth/device/poll", post(auth::device_poll))
+        .route("/v1/auth/redirect/start", post(auth::redirect_start))
+        .route(auth::CALLBACK_PATH, get(auth::redirect_callback))
+        .route("/v1/auth/redirect/exchange", post(auth::redirect_exchange))
         .route("/v1/me", get(auth::me))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),

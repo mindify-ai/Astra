@@ -127,7 +127,12 @@ export function applyOps(state: State, clocks: Clocks, ops: Op[]): State {
     clocks.applied.add(op.id)
     const body = op.body
     if (body.type === 'put') {
-      write(body.entity.kind, body.entity.id, op.hlc, body.entity as unknown as Record<string, unknown>, true)
+      // Messages put before side threads existed carry no `side`; they belong to the main thread.
+      const entity =
+        body.entity.kind === 'message' && body.entity.side === undefined
+          ? { ...body.entity, side: null }
+          : body.entity
+      write(entity.kind, entity.id, op.hlc, entity as unknown as Record<string, unknown>, true)
     } else if (body.type === 'patch') {
       write(body.entityKind, body.id, op.hlc, body.fields, false)
     } else if (body.type === 'delete') {

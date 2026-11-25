@@ -76,24 +76,34 @@ reviewer's pick, and checks the git result.
 
 ### Web sign-in
 
-The web app signs in with GitHub through the relay's OAuth device flow (GitLab is hidden for now). It shows a code, you approve
-it on GitHub, and no password or GitHub token ever reaches the browser.
+_Continue with GitHub_ takes you to GitHub's own sign-in page and back into the app, signed in (the redirect
+flow, run by the relay). When the relay has no client secret it falls back to the device flow: Astra shows a code
+and you approve it on GitHub. Either way no password or GitHub token ever reaches the browser. GitLab is hidden for
+now.
 
 | Variable (build time)   | Effect                                                                                             |
 | ----------------------- | -------------------------------------------------------------------------------------------------- |
 | `VITE_ASTRA_RELAY_URL`  | Relay base URL, e.g. `https://sync.example.com`. Unset: the in-browser demo workspace, no sign-in. |
 | `VITE_ASTRA_DEV_AUTH=1` | Also shows a developer sign-in form (relay started with `ASTRA_DEV_AUTH=1`).                       |
 
-- The relay needs `GITHUB_CLIENT_ID` from a GitHub OAuth app (GitHub → Settings → Developer settings → OAuth Apps)
-  with **Enable Device Flow** ticked. No client secret or callback URL is used. With Terraform this is
-  `github_oauth_client_id`. If either is wrong, sign-in says so and the relay logs it.
+- The relay needs a GitHub OAuth app (GitHub → Settings → Developer settings → OAuth Apps):
+  - `GITHUB_CLIENT_ID`, and **Enable Device Flow** ticked (the fallback, and the desktop's local sign-in).
+  - For one-click sign-in, also `GITHUB_CLIENT_SECRET`, and the app's **Authorization callback URL** set to
+    `https://<relay>/v1/auth/redirect/callback`. Set `ASTRA_PUBLIC_URL=https://<relay>` when the relay can't tell
+    its public address from the request. The secret stays on the relay.
+  - With Terraform these are `github_oauth_client_id` and `github_oauth_client_secret` (kept in Secret Manager).
+  - The relay only sends browsers back to `ASTRA_ALLOWED_ORIGINS` or a loopback address (the desktop app).
+  - If anything is wrong, sign-in says so and the relay logs it.
 - Add `?signin` to the demo URL to try the sign-in screen without a relay.
-- The desktop app signs in from Welcome's _Continue with GitHub_. With no sync server it talks to GitHub itself,
-  with the OAuth app client id built into `apps/desktop/src-tauri/src/github.rs` (override at build time with
-  `ASTRA_GITHUB_CLIENT_ID`; that app needs **Enable Device Flow** too). No client secret is used or shipped. Then
-  the Repo screen lists your GitHub repositories and clones one into `~/Astra` in one click. With a sync server
-  address (default from `VITE_ASTRA_RELAY_URL` at build time) it signs in through the relay instead. _Open
-  GitHub_ opens your default browser.
+- The desktop app signs in from Welcome's _Continue with GitHub_.
+  - **With a sync server address** (default from `VITE_ASTRA_RELAY_URL` at build time): GitHub's sign-in page opens
+    in your default browser. When you approve, the relay sends the browser to a loopback port the app listens on,
+    the page says you're signed in, and Astra comes back to the front.
+  - **With no sync server**: it talks to GitHub itself, with the OAuth app client id built into
+    `apps/desktop/src-tauri/src/github.rs` (override at build time with `ASTRA_GITHUB_CLIENT_ID`; that app needs
+    **Enable Device Flow** too). GitHub's redirect flow needs a client secret, and none can ship in an app, so this
+    route uses a code: GitHub opens with the code already copied, and Astra comes back to the front once you
+    approve. Then the Repo screen lists your GitHub repositories and clones one into `~/Astra` in one click.
 
 ## Layout
 

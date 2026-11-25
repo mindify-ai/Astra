@@ -112,6 +112,8 @@ export interface HostCapabilities {
   copy?: (text: string) => Promise<void>
   /** Opens a web page in the default browser (the desktop webview cannot open one itself). */
   openUrl?: (url: string) => void
+  /** Brings the app's window to the front (after signing in in the browser). */
+  focusWindow?: () => void
   /** Ends the session (signed in to a relay). */
   signOut?: () => void
   /** Signs in to a sync server from inside the app (desktop app). */
@@ -129,6 +131,40 @@ export const useHost = () => useContext(HostContext)
 
 // ── UI preferences shared across screens (current repo, last mission, share panel) ──
 
+export type Side = 'left' | 'right'
+
+/** Where the workbench's panes sit around the code editor; kept per device. */
+export interface WorkbenchLayout {
+  chat: { open: boolean; side: Side }
+  browser: { open: boolean; side: Side }
+  /** The terminal dock's edge (every screen). */
+  terminal: 'bottom' | 'right'
+}
+
+export const defaultLayout: WorkbenchLayout = {
+  chat: { open: true, side: 'left' },
+  browser: { open: false, side: 'right' },
+  terminal: 'bottom',
+}
+
+function readLayout(): WorkbenchLayout {
+  try {
+    const raw = JSON.parse(read('astra.layout') ?? 'null') as Partial<WorkbenchLayout> | null
+    if (!raw || typeof raw !== 'object') return defaultLayout
+    const side = (v: unknown, d: Side): Side => (v === 'left' || v === 'right' ? v : d)
+    return {
+      chat: { open: raw.chat?.open !== false, side: side(raw.chat?.side, defaultLayout.chat.side) },
+      browser: {
+        open: raw.browser?.open === true,
+        side: side(raw.browser?.side, defaultLayout.browser.side),
+      },
+      terminal: raw.terminal === 'right' ? 'right' : 'bottom',
+    }
+  } catch {
+    return defaultLayout
+  }
+}
+
 interface UiState {
   repoId: string
   setRepoId: (id: string) => void
@@ -140,6 +176,14 @@ interface UiState {
   setTerminalOpen: (open: boolean) => void
   paletteOpen: boolean
   setPaletteOpen: (open: boolean) => void
+  layout: WorkbenchLayout
+  setLayout: (update: (l: WorkbenchLayout) => WorkbenchLayout) => void
+  /** The side-chat panel on the thread screen. */
+  sideOpen: boolean
+  setSideOpen: (open: boolean) => void
+  /** The side thread shown per mission; null starts a new one. */
+  sideThreads: Readonly<Record<string, string | null>>
+  setSideThread: (missionId: string, side: string | null) => void
 }
 
 const UiContext = createContext<UiState | null>(null)
@@ -199,6 +243,24 @@ export function AstraProvider({
   const [shareMissionId, openShare] = useState<string | null>(null)
   const [terminalOpen, setTerminalOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
+  const [layout, setLayoutState] = useState(readLayout)
+  const setLayout = useCallback((update: (l: WorkbenchLayout) => WorkbenchLayout) => {
+    setLayoutState((l) => {
+      const next = update(l)
+      write('astra.layout', JSON.stringify(next))
+      return next
+    })
+  }, [])
+  const [sideOpen, setSideOpenState] = useState(() => read('astra.side') === 'open')
+  const setSideOpen = useCallback((open: boolean) => {
+    setSideOpenState(open)
+    write('astra.side', open ? 'open' : 'closed')
+  }, [])
+  const [sideThreads, setSideThreads] = useState<Record<string, string | null>>({})
+  const setSideThread = useCallback(
+    (missionId: string, side: string | null) => setSideThreads((t) => ({ ...t, [missionId]: side })),
+    [],
+  )
   const ui = useMemo<UiState>(
     () => ({
       repoId,
@@ -217,8 +279,26 @@ export function AstraProvider({
       setTerminalOpen,
       paletteOpen,
       setPaletteOpen,
+      layout,
+      setLayout,
+      sideOpen,
+      setSideOpen,
+      sideThreads,
+      setSideThread,
     }),
-    [repoId, lastMissionId, shareMissionId, terminalOpen, paletteOpen],
+    [
+      repoId,
+      lastMissionId,
+      shareMissionId,
+      terminalOpen,
+      paletteOpen,
+      layout,
+      setLayout,
+      sideOpen,
+      setSideOpen,
+      sideThreads,
+      setSideThread,
+    ],
   )
 
   return (

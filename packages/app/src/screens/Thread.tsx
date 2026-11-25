@@ -1,6 +1,6 @@
-import { sendMessage } from '@astra/client'
 import {
   Button,
+  buttonClass,
   cx,
   Data,
   Eyebrow,
@@ -28,10 +28,28 @@ import {
   orderedMissions,
   roleName,
 } from '../select'
+import { Composer } from '../shared/composer'
+import { agentMentions, commandsFor, missionHarnesses } from '../shared/harness'
 import { ArchivedBanner, MissionActions } from '../shared/missionActions'
+import { SideChat, sendFromComposer } from '../shared/sideChat'
 import { latestPerAgent, MessageItem, messagesOf } from '../shared/thread'
 import { AppHeader, NewMissionButton, Page, ShareButton } from '../shell/AppHeader'
 import { MissionNotFound, useMissionPresence } from './common'
+
+const readOutputPref = () => {
+  try {
+    return localStorage.getItem('astra.thread.output') === 'open'
+  } catch {
+    return false
+  }
+}
+const writeOutputPref = (open: boolean) => {
+  try {
+    localStorage.setItem('astra.thread.output', open ? 'open' : 'folded')
+  } catch {
+    // Storage is unavailable: the choice lasts until reload.
+  }
+}
 
 /** 6 · Thread: the mission conversation between people and agents. */
 export function Thread({ missionId }: { missionId: string }) {
@@ -49,6 +67,15 @@ export function Thread({ missionId }: { missionId: string }) {
     max: 520,
     axis: 'x',
   })
+  const [sideWidth, sideHandle] = useResizable({
+    storageKey: 'astra.size.thread.side',
+    initial: 360,
+    min: 280,
+    max: 640,
+    axis: 'x',
+    invert: true,
+  })
+  const [showOutput, setShowOutput] = useState(() => readOutputPref())
   const listEnd = useRef<HTMLDivElement>(null)
   const messages = messagesOf(s, missionId)
   useMissionPresence(missionId, 'Watching the thread')
@@ -69,17 +96,31 @@ export function Thread({ missionId }: { missionId: string }) {
   const latest = latestPerAgent(messages)
   const mayWrite = canSteer(s, s.me, missionId)
 
+  const target = to === 'all' ? null : to
   const send = async () => {
-    if (!draft.trim()) return
-    const text = draft
-    setDraft('')
+    const text = draft.trim()
+    if (!text) return
     setSendError(null)
-    const outcome = await sendMessage(client, missionId, to === 'all' ? null : to, text)
-    if (outcome && !outcome.ok) setSendError(outcome.error ?? 'The message was not delivered.')
+    // `/btw <question>` asks on the side: the agents and this thread carry on undisturbed.
+    if (text === '/btw') {
+      setSendError('Add a question after /btw.')
+      return
+    }
+    setDraft('')
+    const error = await sendFromComposer(client, ui, missionId, target, text)
+    if (error) setSendError(error)
+  }
+  const toggleOutput = () => {
+    setShowOutput((on) => {
+      writeOutputPref(!on)
+      return !on
+    })
   }
 
   return (
     <Page
+      // With the side chat open, the thread and the side chat scroll on their own so both composers stay in view.
+      className={ui.sideOpen ? 'h-dvh' : undefined}
       header={
         <AppHeader
           repoSelect
@@ -95,10 +136,13 @@ export function Thread({ missionId }: { missionId: string }) {
         />
       }
     >
-      <div className="flex grow flex-wrap">
+      <div className={cx('flex grow', ui.sideOpen ? 'min-h-0' : 'flex-wrap')}>
         <aside
           style={{ flexBasis: asideWidth }}
-          className="relative box-border flex flex-[1_1_240px] flex-col gap-8 border-r border-line bg-surface-alt px-3 py-6"
+          className={cx(
+            'relative box-border flex flex-[1_1_240px] flex-col gap-8 border-r border-line bg-surface-alt px-3 py-6',
+            ui.sideOpen && 'overflow-y-auto',
+          )}
         >
           <ResizeHandle {...asideHandle} label="Resize sidebar" />
           <section className="flex flex-col gap-2">
@@ -165,7 +209,9 @@ export function Thread({ missionId }: { missionId: string }) {
           </section>
         </aside>
 
-        <main className="flex min-w-0 flex-[999_1_560px] flex-col">
+        <main
+          className={cx('flex min-w-0 flex-[999_1_560px] flex-col', ui.sideOpen && 'min-h-0 overflow-y-auto')}
+        >
           <ArchivedBanner missionId={missionId} />
           <div className="flex flex-wrap items-end justify-between gap-x-8 gap-y-4 border-b border-line px-8 py-6">
             <div className="flex flex-col gap-2">
@@ -175,9 +221,29 @@ export function Thread({ missionId }: { missionId: string }) {
                 {mission.branch} · {agents.length} agents · {people.length} people
               </Data>
             </div>
-            {mission.stats ? (
-              <Data className="text-ink-muted">{formatDiffStats(mission.stats, 'files changed')}</Data>
-            ) : null}
+            <div className="flex items-center gap-4">
+              {mission.stats ? (
+                <Data className="text-ink-muted">{formatDiffStats(mission.stats, 'files changed')}</Data>
+              ) : null}
+              <button
+                type="button"
+                aria-pressed={showOutput}
+                title="Agents' command output is folded; open one to examine it, or show them all"
+                onClick={toggleOutput}
+                className={buttonClass('text', 'sm', showOutput ? 'text-ink' : 'text-ink-muted')}
+              >
+                {showOutput ? 'FOLD OUTPUT' : 'SHOW OUTPUT'}
+              </button>
+              <button
+                type="button"
+                className={buttonClass('text', 'sm', ui.sideOpen ? 'text-ink' : 'text-ink-muted')}
+                aria-pressed={ui.sideOpen}
+                title="Ask questions beside the thread without interrupting the agents"
+                onClick={() => ui.setSideOpen(!ui.sideOpen)}
+              >
+                SIDE CHAT
+              </button>
+            </div>
           </div>
 
           <ol aria-label="Thread" className="m-0 max-w-[880px] grow list-none px-8 py-0">
@@ -187,13 +253,17 @@ export function Thread({ missionId }: { missionId: string }) {
                 message={m}
                 showStatus={latest.has(m.id)}
                 last={i === messages.length - 1}
+                outputOpen={showOutput}
               />
             ))}
             <div ref={listEnd} />
           </ol>
 
           <form
-            className="flex flex-wrap items-center gap-3 border-t border-line px-8 pt-4 pb-6"
+            className={cx(
+              'flex flex-wrap items-center gap-3 border-t border-line px-8 pt-4 pb-6',
+              ui.sideOpen && 'sticky bottom-0 z-10 bg-surface',
+            )}
             onSubmit={(e) => {
               e.preventDefault()
               void send()
@@ -210,14 +280,22 @@ export function Thread({ missionId }: { missionId: string }) {
                 </option>
               ))}
             </Select>
-            <input
-              type="text"
-              aria-label="Message"
+            <Composer
+              label="Message"
               value={draft}
-              onChange={(e) => setDraft(e.target.value)}
+              onChange={setDraft}
+              onSubmit={() => void send()}
               disabled={!mayWrite}
-              placeholder={mayWrite ? 'Message the agents, or steer one' : 'You can watch this mission'}
-              className="box-border h-10 min-w-0 flex-[1_1_320px] rounded-sm border border-line-strong bg-surface-raised px-3 text-ink"
+              placeholder={
+                mayWrite
+                  ? 'Message the agents, / for commands, @ for files and agents'
+                  : 'You can watch this mission'
+              }
+              commands={commandsFor(missionHarnesses(s, missionId, target))}
+              mentions={agentMentions(s, missionId)}
+              repoId={mission.repoId}
+              onPickMention={(m) => (m.missionAgentId ? setTo(m.missionAgentId) : undefined)}
+              className="flex-[1_1_320px]"
             />
             <Button type="submit" disabled={!mayWrite}>
               Send
@@ -229,6 +307,15 @@ export function Thread({ missionId }: { missionId: string }) {
             ) : null}
           </form>
         </main>
+        {ui.sideOpen ? (
+          <aside
+            style={{ width: sideWidth }}
+            className="relative box-border flex min-h-0 shrink-0 flex-col border-l border-line"
+          >
+            <ResizeHandle {...sideHandle} label="Resize side chat" />
+            <SideChat missionId={missionId} onClose={() => ui.setSideOpen(false)} className="min-h-0 grow" />
+          </aside>
+        ) : null}
       </div>
     </Page>
   )

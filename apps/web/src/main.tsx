@@ -1,6 +1,7 @@
 import { AstraApp, type Platform, SignIn } from '@astra/app'
 import {
   type AstraClient,
+  browserRedirect,
   clearSession,
   demoSeed,
   loadSession,
@@ -48,11 +49,13 @@ function Workspace({ client, onSignOut }: { client: AstraClient; onSignOut?: () 
 /** Signed in to a relay: the real workspace, synced and cached in IndexedDB. */
 function Hosted({ relay }: { relay: string }) {
   const [session, setSession] = useState<Session | null>(() => loadSession(relay))
-  const auth = useMemo(() => new RelayAuth(relay), [relay])
+  // One click: GitHub's sign-in page in this tab, then back here (the device flow when the relay can't).
+  const auth = useMemo(() => new RelayAuth(relay, undefined, browserRedirect), [relay])
   const signOut = () => {
     clearSession()
     setSession(null)
   }
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a new client only when the session changes
   const client = useMemo(
     () =>
       session
@@ -65,7 +68,6 @@ function Hosted({ relay }: { relay: string }) {
             onUnauthorized: signOut,
           })
         : null,
-    // biome-ignore lint/correctness/useExhaustiveDependencies: a new client only when the session changes
     [session, relay],
   )
   if (!session || !client) {

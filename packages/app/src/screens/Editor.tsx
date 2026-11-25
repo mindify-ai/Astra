@@ -20,6 +20,7 @@ import { type KeyboardEvent, type ReactNode, useCallback, useEffect, useMemo, us
 import { useAstraState, useHost, useUi } from '../context'
 import { CodeEditor, type Cursor, type DiffCount, languageFor } from '../shared/codeEditor'
 import { AppHeader, Page } from '../shell/AppHeader'
+import { LayoutMenu, Workbench } from '../shell/Workbench'
 
 const readPref = (key: string) => {
   try {
@@ -134,16 +135,16 @@ export function Editor() {
   }
 
   return (
-    <Page className="h-dvh" header={<AppHeader repoSelect nav={null} />}>
+    <Page className="h-dvh" header={<AppHeader repoSelect nav={null} actions={<LayoutMenu />} />}>
       <h1 className="sr-only">Code editor</h1>
-      {body}
+      <Workbench>{body}</Workbench>
     </Page>
   )
 }
 
 function Empty({ title, action, children }: { title: string; action?: boolean; children: ReactNode }) {
   return (
-    <main className="mx-auto flex w-full max-w-[720px] flex-col gap-6 px-6 py-24">
+    <main className="mx-auto flex w-full max-w-[720px] flex-col gap-6 overflow-y-auto px-6 py-24">
       <Eyebrow>Code</Eyebrow>
       <h2 className="m-0 text-title">{title}</h2>
       <p className="m-0 text-ink-muted">{children}</p>
@@ -327,7 +328,7 @@ function Workspace({
 
   const rootDir = dirs['']
   return (
-    <main className="flex min-h-0 grow">
+    <main className="flex min-h-0 min-w-0 grow">
       <aside
         aria-label="Explorer"
         style={{ width: explorerWidth }}

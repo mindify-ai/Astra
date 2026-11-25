@@ -377,6 +377,7 @@ async fn archiving_stops_a_running_mission_quietly_and_unarchiving_brings_it_bac
             mission_id: "m-1".into(),
             to: Some("ma-b".into()),
             body: "go on".into(),
+            side: None,
         },
     );
     let (ok, _) = wait_for(&host, "rejected", |_, ops| result_in(ops, &send)).await;

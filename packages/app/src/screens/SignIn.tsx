@@ -15,6 +15,10 @@ type Step =
   | { kind: 'idle' }
   | { kind: 'starting'; provider: Provider }
   | { kind: 'code'; provider: Provider; code: DeviceCode; issuedAt: number }
+  /** The provider's page is open in the system browser; waiting for it to send the result back (desktop). */
+  | { kind: 'browser'; provider: Provider; url: string }
+  /** The provider sent this page back; trading the result in for a session (web). */
+  | { kind: 'returning' }
   | { kind: 'done'; session: Session }
   | { kind: 'error'; provider: Provider | null; message: string }
 
@@ -31,9 +35,11 @@ function explain(e: unknown, provider: Provider | null): string {
     case 'network':
       return 'Astra could not reach its server. Check your connection and try again.'
     case 'expired':
-      return 'The code expired before it was approved. Start again for a new one.'
+      return 'The sign-in expired before it finished. Start again.'
     case 'denied':
       return `Sign-in was cancelled on ${name}.`
+    case 'badRedirect':
+      return `This sync server doesn't accept sign-ins from this address. Ask whoever runs it to add it to ASTRA_ALLOWED_ORIGINS.`
     default:
       return 'Astra could not sign you in. Try again in a moment.'
   }
@@ -60,7 +66,12 @@ export interface SignInProps {
   server?: { value: string; onChange: (value: string) => void; valid?: boolean; optional?: boolean }
   /** What approving lets Astra do, after "to let Astra" (default: see your name and email). */
   purpose?: string
-  /** Starts this provider's device flow right away (arriving from "Continue with GitHub"). */
+  /**
+   * Opens the provider's page (and copies the code) as soon as a device code arrives, instead of waiting for
+   * "Open GitHub". For hosts whose `openUrl` needs no click to be allowed (the desktop app's system browser).
+   */
+  openOnCode?: boolean
+  /** Starts signing in with this provider right away (arriving from "Continue with GitHub"). */
   autoStart?: Provider
   /** Replaces "Get the desktop app" (the desktop app offers to stay local instead). */
   localAction?: ReactNode
@@ -69,8 +80,9 @@ export interface SignInProps {
 }
 
 /**
- * Sign-in for the web app: the Welcome artboard, where "Continue with GitHub" runs the OAuth device flow
- * through the relay. No passwords or provider tokens ever reach the browser.
+ * Sign-in for the web app: the Welcome artboard. "Continue with GitHub" goes to GitHub's sign-in page and comes
+ * back signed in (the redirect flow, when the relay has a client secret); otherwise it runs the OAuth device
+ * flow through the relay. No passwords or provider tokens ever reach the browser.
  */
 export function SignIn({
   auth,
@@ -83,10 +95,13 @@ export function SignIn({
   server,
   purpose = 'see your name and email',
   autoStart,
+  openOnCode = false,
   localAction,
   header,
 }: SignInProps) {
-  const [step, setStep] = useState<Step>({ kind: 'idle' })
+  const [step, setStep] = useState<Step>(() =>
+    auth.returning?.() ? { kind: 'returning' } : { kind: 'idle' },
+  )
   const [copied, setCopied] = useState(false)
   const [now, setNow] = useState(() => Date.now())
   const [devName, setDevName] = useState('')
@@ -101,7 +116,18 @@ export function SignIn({
     return () => clearInterval(t)
   }, [step.kind])
 
-  const begin = async (provider: Provider) => {
+  const fail = (e: unknown, provider: Provider | null) => {
+    if (e instanceof AuthError && e.code === 'cancelled') return
+    setStep({ kind: 'error', provider, message: explain(e, provider) })
+  }
+
+  const finish = async (session: Session) => {
+    setStep({ kind: 'done', session })
+    await onSignedIn(session)
+  }
+
+  /** The device flow: a code to enter on the provider's site, then polling until it is approved. */
+  const beginDevice = async (provider: Provider) => {
     abort.current?.abort()
     const ctrl = new AbortController()
     abort.current = ctrl
@@ -112,14 +138,46 @@ export function SignIn({
       if (ctrl.signal.aborted) return
       setNow(Date.now())
       setStep({ kind: 'code', provider, code, issuedAt: Date.now() })
+      if (openOnCode) {
+        void copy(code.userCode)
+        openUrl(code.verificationUriComplete ?? code.verificationUri)
+      }
       const session = await waitForApproval(auth, provider, code, { signal: ctrl.signal })
-      setStep({ kind: 'done', session })
-      await onSignedIn(session)
+      await finish(session)
     } catch (e) {
-      if (e instanceof AuthError && e.code === 'cancelled') return
-      setStep({ kind: 'error', provider, message: explain(e, provider) })
+      fail(e, provider)
     }
   }
+
+  /** One click: the provider's own sign-in page, then back here. Falls back to the device flow when unavailable. */
+  const begin = async (provider: Provider) => {
+    if (!auth.redirect) return beginDevice(provider)
+    abort.current?.abort()
+    const ctrl = new AbortController()
+    abort.current = ctrl
+    setStep({ kind: 'starting', provider })
+    try {
+      const session = await auth.redirect(provider, {
+        signal: ctrl.signal,
+        onOpened: (url) => setStep({ kind: 'browser', provider, url }),
+      })
+      // Null: this page is leaving for the provider and the sign-in finishes when it comes back.
+      if (session) await finish(session)
+    } catch (e) {
+      if (e instanceof AuthError && e.code === 'redirectUnavailable') return beginDevice(provider)
+      fail(e, provider)
+    }
+  }
+
+  // Back from the provider's page (web): trade the result in.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: once, on arrival
+  useEffect(() => {
+    if (step.kind !== 'returning' || !auth.complete) return
+    auth.complete().then(
+      (session) => (session ? finish(session) : setStep({ kind: 'idle' })),
+      (e: unknown) => fail(e, 'github'),
+    )
+  }, [])
 
   const cancel = () => {
     abort.current?.abort()
@@ -138,17 +196,15 @@ export function SignIn({
   const signInDev = async () => {
     if (!auth.devToken || !devName.trim()) return
     try {
-      const session = await auth.devToken(devName.trim())
-      setStep({ kind: 'done', session })
-      await onSignedIn(session)
+      await finish(await auth.devToken(devName.trim()))
     } catch (e) {
-      setStep({ kind: 'error', provider: null, message: explain(e, null) })
+      fail(e, null)
     }
   }
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: start once, on arrival
   useEffect(() => {
-    if (autoStart) void begin(autoStart)
+    if (autoStart && !auth.returning?.()) void begin(autoStart)
   }, [])
 
   const primary = providers[0]
@@ -215,7 +271,11 @@ export function SignIn({
                       disabled={step.kind === 'starting' || noServer}
                       onClick={() => void begin(p)}
                     >
-                      {busy ? 'Connecting…' : `Continue with ${providerName[p]}${p === primary ? ' →' : ''}`}
+                      {busy
+                        ? auth.redirect
+                          ? `Opening ${providerName[p]}…`
+                          : 'Connecting…'
+                        : `Continue with ${providerName[p]}${p === primary ? ' →' : ''}`}
                     </Button>
                   )
                 })}
@@ -253,13 +313,55 @@ export function SignIn({
             />
           ) : null}
 
+          {step.kind === 'browser' ? (
+            <section
+              aria-labelledby="browser-step"
+              className="mt-8 flex max-w-[640px] flex-col gap-6 border border-line bg-surface-raised p-6"
+            >
+              <div className="flex flex-col gap-2">
+                <Eyebrow as="h2" id="browser-step">
+                  Sign in with {providerName[step.provider]}
+                </Eyebrow>
+                <p className="m-0 text-ink-muted">
+                  Finish in your browser. Astra comes back here by itself once {providerName[step.provider]}{' '}
+                  lets it {purpose}. Astra never sees your {providerName[step.provider]} password.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
+                <Button variant="outline" onClick={() => openUrl(step.url)}>
+                  Open {providerName[step.provider]} again
+                </Button>
+                <Button variant="text" size="md" onClick={() => void beginDevice(step.provider)}>
+                  Use a code instead
+                </Button>
+                <Button variant="text" size="md" onClick={cancel}>
+                  Cancel
+                </Button>
+              </div>
+              <div className="border-t border-line pt-4">
+                <Status tone="working">Waiting for {providerName[step.provider]}</Status>
+              </div>
+            </section>
+          ) : null}
+
+          {step.kind === 'returning' ? (
+            <p role="status" className="m-0 mt-8">
+              <Status tone="working">Signing you in…</Status>
+            </p>
+          ) : null}
+
           {step.kind === 'done' ? (
             <p role="status" className="m-0 mt-8">
               <Status tone="success">Signed in as {step.session.person.name}. Opening your workspace…</Status>
             </p>
           ) : null}
 
-          {devAuth && auth.devToken && step.kind !== 'code' && step.kind !== 'done' ? (
+          {devAuth &&
+          auth.devToken &&
+          step.kind !== 'code' &&
+          step.kind !== 'done' &&
+          step.kind !== 'browser' &&
+          step.kind !== 'returning' ? (
             <form
               className="mt-8 flex flex-wrap items-center gap-3"
               onSubmit={(e) => {

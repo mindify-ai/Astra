@@ -161,6 +161,7 @@ async fn split_mission_with_acp_agent_approval_and_merge() {
             log: vec![],
             approval_id: None,
             at: now_rfc3339(),
+            side: None,
         }),
     );
     let send = host.command(
@@ -170,6 +171,7 @@ async fn split_mission_with_acp_agent_approval_and_merge() {
             mission_id: "m-1".into(),
             to: Some("ma-1".into()),
             body: "please also add a newline".into(),
+            side: None,
         },
     );
     wait_for(&host, "agent reply", |s, _| {
@@ -191,6 +193,7 @@ async fn split_mission_with_acp_agent_approval_and_merge() {
             mission_id: "m-1".into(),
             to: Some("ma-1".into()),
             body: "hi".into(),
+            side: None,
         },
     );
     let r = wait_for(&host, "steering rejection", |_, ops| result_in(ops, &other)).await;
@@ -523,6 +526,7 @@ async fn interrupted_agent_is_marked_and_a_message_restarts_it() {
             mission_id: "m-1".into(),
             to: Some("ma-1".into()),
             body: "keep going".into(),
+            side: None,
         },
     );
     wait_for(&host, "the restarted agent answers", |s, _| {

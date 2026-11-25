@@ -70,6 +70,40 @@ run "secure_defaults" {
     condition     = length(google_dns_record_set.this) == 0
     error_message = "No DNS records unless a zone is given."
   }
+  assert {
+    condition     = length(google_secret_manager_secret.github_client_secret) == 0
+    error_message = "No GitHub client secret unless one is given (the device flow only)."
+  }
+  assert {
+    condition     = length([for e in google_cloud_run_v2_service.relay.template[0].containers[0].env : e if e.name == "ASTRA_PUBLIC_URL" && e.value == "https://sync.example.com"]) == 1
+    error_message = "The relay must know its public URL for the GitHub callback."
+  }
+}
+
+run "github_one_click_sign_in" {
+  command = plan
+
+  variables {
+    github_oauth_client_id     = "Ov23liExample"
+    github_oauth_client_secret = "not-a-real-secret"
+  }
+
+  assert {
+    condition     = google_secret_manager_secret.github_client_secret[0].secret_id == "astra-github-client-secret"
+    error_message = "The client secret is kept in Secret Manager."
+  }
+  assert {
+    condition     = length([for e in google_cloud_run_v2_service.relay.template[0].containers[0].env : e if e.name == "GITHUB_CLIENT_SECRET" && length(e.value_source) == 1]) == 1
+    error_message = "The relay reads the client secret from Secret Manager, never from a plain env value."
+  }
+  assert {
+    condition     = length([for e in google_cloud_run_v2_service.relay.template[0].containers[0].env : e if e.name == "GITHUB_CLIENT_SECRET" && e.value != null && e.value != ""]) == 0
+    error_message = "The client secret must not appear as a plain env value."
+  }
+  assert {
+    condition     = length(google_secret_manager_secret_iam_member.relay_github) == 1
+    error_message = "The relay's service account can read the client secret."
+  }
 }
 
 run "dns_and_scale_out" {

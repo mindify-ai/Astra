@@ -43,7 +43,12 @@ export class HlcClock {
 
 const CROCKFORD = '0123456789ABCDEFGHJKMNPQRSTVWXYZ'
 
-/** A ULID: 48-bit time + 80 random bits, Crockford base32. */
+let lastUlid: { time: number; rand: number[] } | null = null
+
+/**
+ * A ULID (48-bit time + 80 random bits, Crockford base32). Monotonic within a millisecond (the ULID spec's monotonic factory): two ids made in the same
+ * millisecond sort in the order they were made, so a reply never sorts before what it answers.
+ */
 export function ulid(now: number = Date.now()): string {
   let time = ''
   let t = now
@@ -51,9 +56,22 @@ export function ulid(now: number = Date.now()): string {
     time = CROCKFORD[t % 32] + time
     t = Math.floor(t / 32)
   }
-  const bytes = new Uint8Array(16)
-  crypto.getRandomValues(bytes)
-  let rand = ''
-  for (let i = 0; i < 16; i++) rand += CROCKFORD[(bytes[i] ?? 0) % 32]
-  return time + rand
+  let rand: number[]
+  const prev = lastUlid
+  if (prev && prev.time === now && prev.rand.some((d) => d < 31)) {
+    rand = [...prev.rand]
+    for (let i = 15; i >= 0; i--) {
+      if ((rand[i] ?? 0) < 31) {
+        rand[i] = (rand[i] ?? 0) + 1
+        break
+      }
+      rand[i] = 0
+    }
+  } else {
+    const bytes = new Uint8Array(16)
+    crypto.getRandomValues(bytes)
+    rand = Array.from(bytes, (b) => b % 32)
+  }
+  lastUlid = { time: now, rand }
+  return time + rand.map((d) => CROCKFORD[d]).join('')
 }
