@@ -117,8 +117,19 @@ describe('RelayAuth', () => {
       'https://sync.example.com',
       (async () => new Response(JSON.stringify({ error: 'notConfigured' }), { status: 503 })) as typeof fetch,
     )
-    await expect(auth.start('gitlab')).rejects.toMatchObject({ code: 'notConfigured' })
+    await expect(auth.start('github')).rejects.toMatchObject({ code: 'notConfigured' })
   })
+
+  it.each(['deviceFlowDisabled', 'badClientId'] as const)(
+    'reports a misconfigured OAuth app (%s)',
+    async (error) => {
+      const auth = new RelayAuth(
+        'https://sync.example.com',
+        (async () => new Response(JSON.stringify({ error }), { status: 503 })) as typeof fetch,
+      )
+      await expect(auth.start('github')).rejects.toMatchObject({ code: error })
+    },
+  )
 
   it('reports network failures', async () => {
     const auth = new RelayAuth('https://sync.example.com', (async () => {

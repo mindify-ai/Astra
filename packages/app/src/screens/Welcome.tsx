@@ -28,17 +28,13 @@ export function Welcome() {
           </p>
           <div className="mt-8 flex flex-wrap gap-3">
             {signIn ? (
-              <>
-                <Link to="/signin" search={{ provider: 'github' }} className={buttonClass('primary', 'lg')}>
-                  Continue with GitHub →
-                </Link>
-              </>
+              <Link to="/signin" search={{ provider: 'github' }} className={buttonClass('primary', 'lg')}>
+                Continue with GitHub →
+              </Link>
             ) : (
-              <>
-                <Link to="/setup/repo" search={{ source: 'github' }} className={buttonClass('primary', 'lg')}>
-                  Continue with GitHub →
-                </Link>
-              </>
+              <Link to="/setup/repo" search={{ source: 'github' }} className={buttonClass('primary', 'lg')}>
+                Continue with GitHub →
+              </Link>
             )}
             <Link to="/setup/repo" search={{ source: 'local' }} className={buttonClass('outline', 'lg')}>
               Open a local folder

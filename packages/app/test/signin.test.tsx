@@ -40,12 +40,43 @@ describe('SignIn', () => {
       poll: async () => ({ status: 'pending' }),
     }
     render(<SignIn auth={auth} onSignedIn={() => {}} />)
-    fireEvent.click(screen.getByRole('button', { name: 'Continue with GitLab' }))
+    // GitHub only, for now.
+    expect(screen.queryByRole('button', { name: /GitLab/ })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Continue with GitHub →' }))
     expect((await screen.findByRole('alert')).textContent).toContain(
-      'Sign-in with GitLab is not set up on this server yet.',
+      'Sign-in with GitHub is not set up on this server yet.',
     )
-    // The buttons stay available to try another way.
+    // The button stays available to try again.
     expect(screen.getByRole('button', { name: 'Continue with GitHub →' })).toBeTruthy()
+  })
+
+  it.each([
+    ['deviceFlowDisabled', 'its GitHub OAuth app needs device flow enabled'],
+    ['badClientId', 'GitHub does not know its client ID'],
+  ] as const)('explains a misconfigured OAuth app (%s)', async (code, text) => {
+    const auth: Auth = {
+      start: async () => {
+        throw new AuthError(code)
+      },
+      poll: async () => ({ status: 'pending' }),
+    }
+    render(<SignIn auth={auth} onSignedIn={() => {}} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Continue with GitHub →' }))
+    expect((await screen.findByRole('alert')).textContent).toContain(text)
+  })
+
+  it('opens GitHub and copies the code through the host when given (desktop app)', async () => {
+    const openUrl = vi.fn()
+    const copyText = vi.fn(async () => {})
+    render(<SignIn auth={new MockAuth()} onSignedIn={() => {}} openUrl={openUrl} copyText={copyText} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Continue with GitHub →' }))
+    await screen.findByLabelText('Your code')
+    // The address shows too, in case the browser cannot be opened.
+    expect(screen.getByText('https://github.com/login/device')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Open GitHub →' }))
+    expect(openUrl).toHaveBeenCalledWith('https://github.com/login/device')
+    expect(copyText).toHaveBeenCalledWith('WDJB-MJHT')
+    expect(navigator.clipboard.writeText).not.toHaveBeenCalled()
   })
 
   it('reports a denied request and can start again', async () => {
