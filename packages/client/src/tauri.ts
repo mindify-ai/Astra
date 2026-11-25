@@ -19,6 +19,8 @@ export interface NodeInfo {
   me: string
   /** Null in a local-only workspace. */
   account: DesktopAccount | null
+  /** The GitHub account signed in on this app directly (no sync server), or null. */
+  github: { login: string; name: string } | null
 }
 
 /**

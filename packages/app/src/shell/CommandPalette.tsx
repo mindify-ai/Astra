@@ -193,6 +193,23 @@ export function CommandPalette() {
         keywords: 'github account relay server team',
         run: () => void navigate({ to: '/signin', search: { provider: 'github' } }),
       })
+    if (host.github?.login) {
+      const github = host.github
+      out.push({
+        id: 'github-repos',
+        group: 'Actions',
+        label: 'Clone a GitHub repository',
+        keywords: 'github clone repository repo',
+        run: () => void navigate({ to: '/setup/repo', search: { source: 'github' } }),
+      })
+      out.push({
+        id: 'github-signout',
+        group: 'Actions',
+        label: `Sign out of GitHub (@${github.login})`,
+        keywords: 'github account',
+        run: () => void github.signOut().then(() => location.reload()),
+      })
+    }
     if (host.signOut) out.push({ id: 'signout', group: 'Actions', label: 'Sign out', run: host.signOut })
     return out
   }, [s, ui, host, query, navigate])

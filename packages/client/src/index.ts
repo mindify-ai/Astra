@@ -1,6 +1,14 @@
 export * from './actions'
 export * from './auth'
 export { type FileEntry, type FilesHost, HIDDEN_DIRS, memoryFiles, relativeSegments } from './files'
+export {
+  type GithubHost,
+  type GithubRepo,
+  githubError,
+  MockGithub,
+  repositoryFromGithub,
+  tauriGithub,
+} from './github'
 export * from './hlc'
 export { MockClient, type MockOptions } from './mock'
 export * from './policy'

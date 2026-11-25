@@ -3,6 +3,7 @@ import type {
   Auth,
   Connectivity,
   FilesHost,
+  GithubHost,
   Person,
   Session,
   State,
@@ -97,7 +98,10 @@ export interface HostAccount {
   person: Person | null
   /** The OAuth device flow, run through `server`. */
   auth: (server: string) => Auth
-  /** Saves the session and reopens the app on that server's workspace. */
+  /**
+   * Saves the session and reopens the app on that server's workspace. An empty `server` means you signed in
+   * with GitHub on this machine only (`HostCapabilities.github`); the app reopens on choosing a repository.
+   */
   signIn: (server: string, session: Session) => Promise<void>
 }
 
@@ -112,6 +116,8 @@ export interface HostCapabilities {
   signOut?: () => void
   /** Signs in to a sync server from inside the app (desktop app). */
   account?: HostAccount
+  /** GitHub on this machine: sign in without a server, list and clone your repositories (desktop app). */
+  github?: GithubHost
   /** Runs shells on this machine for the terminal dock (desktop app). */
   terminal?: TerminalHost
   /** Reads and writes the repository's files for the code editor (desktop app). */

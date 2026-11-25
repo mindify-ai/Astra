@@ -35,6 +35,8 @@ export type AuthErrorCode =
   | 'deviceFlowDisabled'
   /** The server's OAuth client id is unknown to the provider. */
   | 'badClientId'
+  /** No GitHub session on this machine (never signed in, or GitHub no longer accepts its token). */
+  | 'signedOut'
   | 'badProvider'
   | 'network'
   | 'server'

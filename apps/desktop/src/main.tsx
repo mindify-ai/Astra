@@ -6,6 +6,7 @@ import {
   starterSeed,
   TauriClient,
   tauriFiles,
+  tauriGithub,
   tauriTerminal,
 } from '@astra/client'
 import { writeText } from '@tauri-apps/plugin-clipboard-manager'
@@ -60,8 +61,15 @@ function startNode() {
         server: signedIn?.server ?? import.meta.env.VITE_ASTRA_RELAY_URL ?? '',
         person: signedIn?.person ?? null,
         auth: (server) => new RelayAuth(server),
-        signIn: (server, session) => TauriClient.signIn(server, session),
+        signIn: async (server, session) => {
+          if (server) return TauriClient.signIn(server, session)
+          // Signed in with GitHub on this machine: reopen on your repositories, with the account loaded.
+          location.hash = '#/setup/repo?source=github'
+          location.reload()
+        },
       }
+      // GitHub on this machine (sign in without a server, list and clone your repositories): desktops only.
+      const github = desktop ? tauriGithub(client.info?.github?.login ?? null) : undefined
       root.render(
         <StrictMode>
           <AstraApp
@@ -81,6 +89,7 @@ function startNode() {
               copy: (text) => writeText(text),
               openUrl: (url) => void openUrl(url),
               account,
+              github,
               signOut: signedIn ? () => void TauriClient.signOut() : undefined,
               terminal: desktop ? tauriTerminal : undefined,
               files: desktop ? tauriFiles : undefined,

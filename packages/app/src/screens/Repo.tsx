@@ -1,9 +1,10 @@
-import { slugify } from '@astra/client'
+import { addRepository, slugify } from '@astra/client'
 import { Button, buttonClass, cx, Dot, Eyebrow, inlineLinkClass, TextInput } from '@astra/ui'
-import { Link, useNavigate } from '@tanstack/react-router'
+import { Link, useNavigate, useSearch } from '@tanstack/react-router'
 import { useState } from 'react'
 import { useAstraState, useClient, useHost, useUi } from '../context'
 import { AppHeader, Page } from '../shell/AppHeader'
+import { GithubRepos } from './GithubRepos'
 
 const sourceLabel = { github: 'GITHUB', gitlab: 'GITLAB', local: 'LOCAL FOLDER' } as const
 
@@ -14,6 +15,7 @@ export function Repo() {
   const host = useHost()
   const ui = useUi()
   const navigate = useNavigate()
+  const { source } = useSearch({ from: '/setup/repo' })
   const [query, setQuery] = useState('')
   const repos = Object.values(state.repositories).filter((r) =>
     r.name.toLowerCase().includes(query.trim().toLowerCase()),
@@ -24,20 +26,15 @@ export function Repo() {
     if (!path) return
     const name = path.replace(/^\/(Users|home)\/[^/]+/, '~')
     const id = `r-${slugify(name)}`
-    await client.submit([
-      {
-        type: 'put',
-        entity: {
-          kind: 'repository',
-          id,
-          name,
-          source: 'local',
-          defaultBranch: 'main',
-          path,
-          remoteUrl: null,
-        },
-      },
-    ])
+    await addRepository(client, {
+      kind: 'repository',
+      id,
+      name,
+      source: 'local',
+      defaultBranch: 'main',
+      path,
+      remoteUrl: null,
+    })
     ui.setRepoId(id)
   }
 
@@ -63,6 +60,7 @@ export function Repo() {
             the top bar.
           </p>
         </div>
+        {host.github && source === 'github' ? <GithubRepos github={host.github} query={query} /> : null}
         <div className="flex flex-col gap-2">
           <TextInput
             type="search"
@@ -103,11 +101,14 @@ export function Repo() {
           {repos.length === 0 ? (
             <p className="m-0 border border-line p-4 text-ink-muted">
               {Object.keys(state.repositories).length === 0
-                ? 'No repositories yet. Open a local folder to add one.'
+                ? host.github
+                  ? 'No repositories yet. Clone one from GitHub or open a local folder.'
+                  : 'No repositories yet. Open a local folder to add one.'
                 : 'No repository matches that search.'}
             </p>
           ) : null}
         </div>
+        {host.github && source !== 'github' ? <GithubRepos github={host.github} query={query} /> : null}
         <div className="flex flex-wrap items-center gap-3 border-t border-line pt-6">
           <button
             type="button"

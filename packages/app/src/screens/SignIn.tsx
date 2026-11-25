@@ -57,7 +57,9 @@ export interface SignInProps {
   /** Copies the code; defaults to the browser clipboard. */
   copyText?: (text: string) => Promise<void>
   /** An editable sync server address (the desktop app, which can sign in to any relay). */
-  server?: { value: string; onChange: (value: string) => void; valid?: boolean }
+  server?: { value: string; onChange: (value: string) => void; valid?: boolean; optional?: boolean }
+  /** What approving lets Astra do, after "to let Astra" (default: see your name and email). */
+  purpose?: string
   /** Starts this provider's device flow right away (arriving from "Continue with GitHub"). */
   autoStart?: Provider
   /** Replaces "Get the desktop app" (the desktop app offers to stay local instead). */
@@ -79,6 +81,7 @@ export function SignIn({
   openUrl = (url) => window.open(url, '_blank', 'noopener,noreferrer'),
   copyText = (text) => navigator.clipboard.writeText(text),
   server,
+  purpose = 'see your name and email',
   autoStart,
   localAction,
   header,
@@ -183,13 +186,18 @@ export function SignIn({
           {step.kind === 'idle' || step.kind === 'starting' || step.kind === 'error' ? (
             <>
               {server ? (
-                <Field label="Sync server" className="mt-8 max-w-[420px]">
+                <Field
+                  label={server.optional ? 'Sync server (optional)' : 'Sync server'}
+                  className="mt-8 max-w-[420px]"
+                >
                   {(id) => (
                     <TextInput
                       id={id}
                       mono
                       inputMode="url"
-                      placeholder="https://sync.example.com"
+                      placeholder={
+                        server.optional ? 'Leave empty to use this machine only' : 'https://sync.example.com'
+                      }
                       value={server.value}
                       onChange={(e) => server.onChange(e.target.value)}
                     />
@@ -232,6 +240,7 @@ export function SignIn({
           {step.kind === 'code' ? (
             <DeviceStep
               provider={step.provider}
+              purpose={purpose}
               code={step.code}
               secondsLeft={Math.max(0, Math.round(step.code.expiresIn - (now - step.issuedAt) / 1000))}
               copied={copied}
@@ -281,6 +290,7 @@ export function SignIn({
 
 function DeviceStep({
   provider,
+  purpose,
   code,
   secondsLeft,
   copied,
@@ -289,6 +299,7 @@ function DeviceStep({
   onCancel,
 }: {
   provider: Provider
+  purpose: string
   code: DeviceCode
   secondsLeft: number
   copied: boolean
@@ -307,8 +318,7 @@ function DeviceStep({
           Sign in with {name}
         </Eyebrow>
         <p className="m-0 text-ink-muted">
-          Open {name} and enter this code to let Astra see your name and email. Astra never sees your {name}{' '}
-          password.
+          Open {name} and enter this code to let Astra {purpose}. Astra never sees your {name} password.
         </p>
         <Spec as="p" className="m-0 break-all normal-case tracking-normal">
           {code.verificationUri}

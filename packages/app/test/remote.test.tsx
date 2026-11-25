@@ -1,4 +1,4 @@
-import { demoSeed, MockAuth, MockClient, type Session, starterSeed } from '@astra/client'
+import { demoSeed, MockAuth, MockClient, MockGithub, type Session, starterSeed } from '@astra/client'
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
@@ -85,7 +85,7 @@ describe('desktop sign-in', () => {
     await user.type(screen.getByLabelText('Sync server'), 'sync.example.com')
     expect(screen.getByRole('button', { name: 'Continue with GitHub →' })).toHaveProperty('disabled', false)
 
-    await user.click(screen.getByRole('link', { name: 'Use this machine only' }))
+    await user.click(screen.getByRole('link', { name: 'Open a local folder' }))
     expect((await screen.findAllByText(/local folder/i)).length).toBeGreaterThan(0)
     expect(screen.queryByLabelText('Sync server')).toBeNull()
   })
@@ -95,5 +95,85 @@ describe('desktop sign-in', () => {
     render(<AstraApp client={client} platform="mac" history={{ memory: '/' }} />)
     const link = await screen.findByRole('link', { name: 'Continue with GitHub →' })
     expect(link.getAttribute('href')).toContain('/setup/repo')
+  })
+})
+
+describe('GitHub on this machine (desktop app)', () => {
+  const account = (signIn: HostAccount['signIn']): HostAccount => ({
+    server: '',
+    person: null,
+    auth: () => new MockAuth(undefined, 1),
+    signIn,
+  })
+
+  it('signs in with GitHub without a sync server, asking for repository access', async () => {
+    const signIn = vi.fn<(server: string, s: Session) => Promise<void>>(async () => {})
+    const github = new MockGithub(null, new MockAuth(undefined, 1))
+    const client = new MockClient({ seed: starterSeed, latency: 0 })
+    render(
+      <AstraApp
+        client={client}
+        platform="mac"
+        history={{ memory: '/' }}
+        host={{ account: account(signIn), github }}
+      />,
+    )
+    const user = userEvent.setup()
+    await user.click(await screen.findByRole('link', { name: 'Continue with GitHub →' }))
+    expect(await screen.findByLabelText('Your code')).toBeTruthy()
+    expect(screen.getByText(/list and clone your repositories/)).toBeTruthy()
+    await vi.waitFor(() => expect(signIn).toHaveBeenCalledOnce(), { timeout: 3000 })
+    expect(signIn.mock.calls[0]?.[0]).toBe('')
+  })
+
+  it('lists your repositories and clones one into the workspace in one click', async () => {
+    const github = new MockGithub('octocat')
+    const client = new MockClient({ seed: starterSeed, latency: 0 })
+    render(
+      <AstraApp
+        client={client}
+        platform="mac"
+        history={{ memory: '/setup/repo?source=github' }}
+        host={{ github, pickFolder: async () => '/Users/you/Code' }}
+      />,
+    )
+    const user = userEvent.setup()
+    const list = await screen.findByRole('list', { name: 'GitHub repositories' })
+    expect(within(list).getByText('octo-org/payments')).toBeTruthy()
+    expect(within(list).getByText('PRIVATE')).toBeTruthy()
+    expect(screen.getByText(/@octocat/)).toBeTruthy()
+
+    await user.type(screen.getByRole('searchbox', { name: 'Search repositories' }), 'pay')
+    expect(within(list).queryByText('octocat/hello-world')).toBeNull()
+
+    await user.click(screen.getByRole('button', { name: 'Change' }))
+    await user.click(screen.getByRole('button', { name: 'Clone octo-org/payments' }))
+    expect(await screen.findByText('Cloned octo-org/payments into ~/Code/payments')).toBeTruthy()
+    expect(github.cloned).toEqual(['octo-org/payments'])
+    const repo = client.getState().repositories['r-gh-octo-org-payments']
+    expect(repo).toMatchObject({
+      name: 'octo-org/payments',
+      source: 'github',
+      defaultBranch: 'trunk',
+      path: '/Users/you/Code/payments',
+      remoteUrl: 'https://github.com/octo-org/payments.git',
+    })
+    // Added and selected: on to connecting agents.
+    expect(screen.getByRole('button', { name: 'Selected' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Continue →' })).toHaveProperty('disabled', false)
+  })
+
+  it('offers to sign in when GitHub is not signed in on this machine', async () => {
+    const client = new MockClient({ seed: starterSeed, latency: 0 })
+    render(
+      <AstraApp
+        client={client}
+        platform="mac"
+        history={{ memory: '/setup/repo?source=github' }}
+        host={{ github: new MockGithub(null) }}
+      />,
+    )
+    const link = await screen.findByRole('link', { name: 'Sign in with GitHub →' })
+    expect(link.getAttribute('href')).toContain('/signin')
   })
 })

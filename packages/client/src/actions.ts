@@ -12,6 +12,7 @@ import type {
   MissionMode,
   Op,
   OpBody,
+  Repository,
   Role,
   State,
 } from './types'
@@ -342,6 +343,11 @@ export async function testAgent(client: AstraClient, agentId: Id): Promise<Comma
   const state = client.getState()
   const nodeId = nodeForAgent(state, state.agents[agentId], client.nodeId)
   return outcomeOf(client, await client.submit([command(nodeId, { type: 'testAgent', agentId })]))
+}
+
+/** Adds a repository to the workspace (a local folder, or a clone of a GitHub repository). */
+export function addRepository(client: AstraClient, repository: Repository) {
+  return client.submit([{ type: 'put', entity: repository }])
 }
 
 export function setMembership(client: AstraClient, missionId: Id, personId: Id, access: Access | null) {

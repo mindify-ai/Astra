@@ -8,8 +8,9 @@ import { AppHeader, Page } from '../shell/AppHeader'
  * hidden for now); otherwise (signed in, or the web app, which signs in before it opens) they go on to choosing a repository.
  */
 export function Welcome() {
-  const { account } = useHost()
-  const signIn = account !== undefined && account.person === null
+  const { account, github } = useHost()
+  // Not signed in anywhere yet: GitHub starts sign-in. Signed in: it goes on to your repositories.
+  const signIn = account !== undefined && account.person === null && !github?.login
   return (
     <Page header={<AppHeader border={false} byline="BY MINDIFY AI" />}>
       <main className="relative flex grow items-end overflow-hidden box-border p-6 sm:p-12">
