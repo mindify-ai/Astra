@@ -131,8 +131,8 @@ local workspace.
 
 - **Keys.** Keys stay in the OS keychain on runner nodes, and nothing secret is synced.
 - **Agent sandboxing.** Agent file access is confined to its worktree, and commands follow the approval policy.
-- **Tauri.** The webview's capabilities are limited to window controls, the OS info read, the folder picker and
-  clipboard writes. Files, processes and the network go through the Rust core.
-- **Relay.** The relay authenticates with JWT (GitHub/GitLab OAuth device flow, from the web or the desktop app)
+- **Tauri.** The webview's capabilities are limited to window controls, the OS info read, the folder picker,
+  clipboard writes and opening `https://github.com/*` pages in the default browser (for sign-in). Files, processes and the network go through the Rust core.
+- **Relay.** The relay authenticates with JWT (GitHub OAuth device flow, from the web or the desktop app; the relay also speaks GitLab, which the apps don't offer for now)
   and enforces workspace membership. It stores ops (messages, diffs, statuses), not repositories.
 - **LAN pairing.** It uses a one-time code from a QR scan.

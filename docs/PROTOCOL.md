@@ -168,13 +168,17 @@ JSON, camelCase. The relay proxies the GitHub/GitLab OAuth **device flow**, beca
 endpoints don't allow browser CORS. The provider's access token is used once to read the profile and then
 discarded.
 
-| Request                                                           | Response                                                                                                                                                                |
-| ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `POST /v1/auth/device/start` `{provider: github\|gitlab}`         | `200 {deviceCode, userCode, verificationUri, verificationUriComplete: string\|null, interval, expiresIn}`; `503 {error: "notConfigured"}`; `400 {error: "badProvider"}` |
-| `POST /v1/auth/device/poll` `{provider, deviceCode}`              | `200 {status: "pending"}` \| `{status: "slowDown", interval}` \| `{status: "expired"}` \| `{status: "denied"}` \| `{status: "complete", session}`                       |
-| `POST /v1/auth/dev-token` `{name}` (only with `ASTRA_DEV_AUTH=1`) | `200 {session}`                                                                                                                                                         |
-| `GET /v1/me` (bearer token)                                       | `200 {person, workspaceId}`; `401 {error: "unauthorized"}`                                                                                                              |
+| Request                                                           | Response                                                                                                                                                                                                         |
+| ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /v1/auth/device/start` `{provider: github\|gitlab}`         | `200 {deviceCode, userCode, verificationUri, verificationUriComplete: string\|null, interval, expiresIn}`; `503 {error: "notConfigured" \| "deviceFlowDisabled" \| "badClientId"}`; `400 {error: "badProvider"}` |
+| `POST /v1/auth/device/poll` `{provider, deviceCode}`              | `200 {status: "pending"}` \| `{status: "slowDown", interval}` \| `{status: "expired"}` \| `{status: "denied"}` \| `{status: "complete", session}`; the same `503`s as start                                      |
+| `POST /v1/auth/dev-token` `{name}` (only with `ASTRA_DEV_AUTH=1`) | `200 {session}`                                                                                                                                                                                                  |
+| `GET /v1/me` (bearer token)                                       | `200 {person, workspaceId}`; `401 {error: "unauthorized"}`                                                                                                                                                       |
 
+- `notConfigured`: no client id for that provider. `deviceFlowDisabled` and `badClientId` mean the OAuth app is set
+  up wrong (device flow not enabled; a client id the provider doesn't know, which GitHub answers with `404`); the
+  relay logs them as errors. A device code the provider doesn't recognise polls as `expired`.
+- The web and desktop apps offer GitHub only for now; the relay still accepts `gitlab`.
 - `Session` = `{token, workspaceId, person: Person, expiresAt}`.
 - `token` is an HS256 JWT (`sub` = personId, `ws` = workspaceId, 30-day expiry).
 - On first sign-in the relay writes the person entity into the workspace op log.

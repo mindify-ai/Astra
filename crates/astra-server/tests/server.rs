@@ -731,7 +731,11 @@ async fn github_oauth_app_misconfiguration_is_reported() {
     let http = reqwest::Client::new();
     for (client_id, status, body) in [
         ("unknown", 503, json!({"error": "badClientId"})),
-        ("no-device-flow", 503, json!({"error": "deviceFlowDisabled"})),
+        (
+            "no-device-flow",
+            503,
+            json!({"error": "deviceFlowDisabled"}),
+        ),
     ] {
         let mut config = dev_config();
         config.providers.github_client_id = Some(client_id.into());

@@ -76,7 +76,7 @@ reviewer's pick, and checks the git result.
 
 ### Web sign-in
 
-The web app signs in with GitHub (or GitLab) through the relay's OAuth device flow. It shows a code, you approve
+The web app signs in with GitHub through the relay's OAuth device flow (GitLab is hidden for now). It shows a code, you approve
 it on GitHub, and no password or GitHub token ever reaches the browser.
 
 | Variable (build time)   | Effect                                                                                             |
@@ -84,11 +84,12 @@ it on GitHub, and no password or GitHub token ever reaches the browser.
 | `VITE_ASTRA_RELAY_URL`  | Relay base URL, e.g. `https://sync.example.com`. Unset: the in-browser demo workspace, no sign-in. |
 | `VITE_ASTRA_DEV_AUTH=1` | Also shows a developer sign-in form (relay started with `ASTRA_DEV_AUTH=1`).                       |
 
-- The relay needs `GITHUB_CLIENT_ID` from a GitHub OAuth app with **device flow enabled**. With Terraform this is
-  `github_oauth_client_id`.
+- The relay needs `GITHUB_CLIENT_ID` from a GitHub OAuth app (GitHub → Settings → Developer settings → OAuth Apps)
+  with **Enable Device Flow** ticked. No client secret or callback URL is used. With Terraform this is
+  `github_oauth_client_id`. If either is wrong, sign-in says so and the relay logs it.
 - Add `?signin` to the demo URL to try the sign-in screen without a relay.
 - The desktop app signs in the same way from Welcome's _Continue with GitHub_. It offers the relay in
-  `VITE_ASTRA_RELAY_URL` at build time, and you can type another.
+  `VITE_ASTRA_RELAY_URL` at build time, and you can type another. _Open GitHub_ opens your default browser.
 
 ## Layout
 
