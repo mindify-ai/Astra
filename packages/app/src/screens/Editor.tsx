@@ -18,7 +18,14 @@ import type { EditorView } from '@codemirror/view'
 import { Link } from '@tanstack/react-router'
 import { type KeyboardEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAstraState, useHost, useUi } from '../context'
-import { CodeEditor, type Cursor, type DiffCount, languageFor } from '../shared/codeEditor'
+import {
+  CodeEditor,
+  type Cursor,
+  type DiffCount,
+  languageFor,
+  nextChange,
+  previousChange,
+} from '../shared/codeEditor'
 import { AppHeader, Page } from '../shell/AppHeader'
 import { LayoutMenu, Workbench } from '../shell/Workbench'
 
@@ -39,6 +46,18 @@ const writePref = (key: string, value: string) => {
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err))
 const baseName = (path: string) => path.split('/').pop() ?? path
 const parentOf = (path: string) => path.split('/').slice(0, -1).join('/')
+
+/** How an open file differs: edited since the last save, or saved but changed since the last commit. */
+export type Edit = 'unsaved' | 'changed'
+
+/** Every folder above the given files (not the root), so the explorer can point the way to edits. */
+export function editedFolders(paths: Iterable<string>): Set<string> {
+  const out = new Set<string>()
+  for (const path of paths) {
+    for (let dir = parentOf(path); dir && !out.has(dir); dir = parentOf(dir)) out.add(dir)
+  }
+  return out
+}
 
 /**
  * The web demo's files: each file a mission on this repository changed, as its race result left it (context
@@ -182,6 +201,7 @@ interface Doc {
 }
 
 const isDirty = (d: Doc) => d.status === 'ready' && d.text !== d.saved
+const hasChanges = (d: DiffCount | null | undefined): d is DiffCount => !!d && (d.added > 0 || d.removed > 0)
 
 function Workspace({
   files,
@@ -205,6 +225,8 @@ function Workspace({
   const view = useRef<EditorView | null>(null)
   const [showDiff, setShowDiff] = useState(() => readPref('astra.editor.diff') !== 'off')
   const [diff, setDiff] = useState<DiffCount | null>(null)
+  /** Each open file's changes against its diff original, as last reported while it was showing. */
+  const [changed, setChanged] = useState<Record<string, DiffCount | null>>({})
   const toggleDiff = () => {
     setShowDiff((on) => {
       writePref('astra.editor.diff', on ? 'off' : 'on')
@@ -283,6 +305,7 @@ function Workspace({
     }
     setArmedClose(null)
     states.delete(path)
+    setChanged(({ [path]: _, ...others }) => others)
     const rest = docsRef.current.filter((d) => d.path !== path)
     const at = docsRef.current.findIndex((d) => d.path === path)
     setDocs(rest)
@@ -306,6 +329,23 @@ function Workspace({
   )
 
   const doc = docs.find((d) => d.path === active) ?? null
+
+  const edited = useMemo(() => {
+    const out = new Map<string, Edit>()
+    for (const d of docs) {
+      if (isDirty(d)) out.set(d.path, 'unsaved')
+      else if (showDiff && hasChanges(changed[d.path])) out.set(d.path, 'changed')
+    }
+    return out
+  }, [docs, changed, showDiff])
+  const editedDirs = useMemo(() => editedFolders(edited.keys()), [edited])
+
+  const stepChange = (step: typeof nextChange) => {
+    const v = view.current
+    if (!v) return
+    step(v)
+    v.focus()
+  }
 
   // ⌘S / Ctrl+S saves the open file. ⌘F / Ctrl+F finds in it: the editor handles that itself when it has
   // focus; from anywhere else on the screen it opens the editor's search.
@@ -355,6 +395,8 @@ function Workspace({
               dirs={dirs}
               expanded={expanded}
               active={active}
+              edited={edited}
+              editedDirs={editedDirs}
               onToggle={toggleDir}
               onOpen={openFile}
               onCollapse={(path) => expanded.has(path) && toggleDir(path)}
@@ -381,6 +423,7 @@ function Workspace({
             const selected = d.path === active
             const dirty = isDirty(d)
             const armed = armedClose === d.path
+            const counts = changed[d.path]
             return (
               <span
                 key={d.path}
@@ -394,7 +437,11 @@ function Workspace({
                   role="tab"
                   aria-selected={selected}
                   aria-controls="code-editor-pane"
-                  title={d.path}
+                  title={
+                    showDiff && hasChanges(counts)
+                      ? `${d.path} · +${counts.added} −${counts.removed}`
+                      : d.path
+                  }
                   onClick={() => {
                     setArmedClose(null)
                     setActive(d.path)
@@ -454,7 +501,15 @@ function Workspace({
               original={showDiff ? (doc.base ?? doc.saved) : null}
               states={states}
               viewRef={view}
-              onDiff={setDiff}
+              onDiff={(d) => {
+                setDiff(d)
+                const path = doc.path
+                setChanged((c) => {
+                  const was = c[path]
+                  if (was?.added === d?.added && was?.removed === d?.removed && path in c) return c
+                  return { ...c, [path]: d }
+                })
+              }}
               onChange={(text) => {
                 setArmedClose(null)
                 patchDoc(doc.path, { text })
@@ -470,6 +525,8 @@ function Workspace({
           showDiff={showDiff}
           committed={doc?.base != null}
           onToggleDiff={toggleDiff}
+          onPreviousChange={() => stepChange(previousChange)}
+          onNextChange={() => stepChange(nextChange)}
         />
       </section>
     </main>
@@ -508,6 +565,8 @@ function Tree({
   dirs,
   expanded,
   active,
+  edited,
+  editedDirs,
   onToggle,
   onOpen,
   onCollapse,
@@ -515,6 +574,9 @@ function Tree({
   dirs: Record<string, Dir>
   expanded: ReadonlySet<string>
   active: string | null
+  /** Open files with edits, and the folders above them, marked with a dot. */
+  edited: ReadonlyMap<string, Edit>
+  editedDirs: ReadonlySet<string>
   onToggle: (path: string) => void
   onOpen: (path: string) => void
   onCollapse: (path: string) => void
@@ -604,6 +666,7 @@ function Tree({
         const { entry } = r
         const dir = entry.kind === 'dir'
         const open = dir && expanded.has(entry.path)
+        const mark = dir ? (editedDirs.has(entry.path) ? 'folder' : null) : (edited.get(entry.path) ?? null)
         return (
           <div
             key={entry.path}
@@ -632,7 +695,24 @@ function Tree({
               {dir ? <ChevronLeftIcon size={12} className={open ? '-rotate-90' : 'rotate-180'} /> : null}
             </span>
             <FileIcon name={entry.name} folder={dir} open={open} className="mr-1.5" />
-            <span className={cx('truncate', dir ? 'text-ink' : 'font-mono text-data')}>{entry.name}</span>
+            <span className={cx('min-w-0 truncate', dir ? 'text-ink' : 'font-mono text-data')}>
+              {entry.name}
+            </span>
+            {mark ? (
+              <>
+                <span
+                  aria-hidden="true"
+                  data-edit={mark}
+                  className={cx(
+                    'ml-auto inline-block size-1.5 shrink-0 rounded-full',
+                    mark === 'unsaved' ? 'bg-ink' : mark === 'changed' ? 'bg-success' : 'bg-ink-muted',
+                  )}
+                />
+                <span className="sr-only">
+                  {mark === 'unsaved' ? ', unsaved' : mark === 'changed' ? ', changed' : ', contains edits'}
+                </span>
+              </>
+            ) : null}
           </div>
         )
       })}
@@ -642,6 +722,9 @@ function Tree({
 
 // ── Status bar ─────────────────────────────────────────────────────────────
 
+const stepClass =
+  'flex size-6 items-center justify-center rounded-sm border-0 bg-transparent p-0 text-ink-muted hover:bg-surface-raised hover:text-ink'
+
 function StatusBar({
   doc,
   cursor,
@@ -649,6 +732,8 @@ function StatusBar({
   showDiff,
   committed,
   onToggleDiff,
+  onPreviousChange,
+  onNextChange,
 }: {
   doc: Doc | null
   cursor: Cursor
@@ -656,6 +741,8 @@ function StatusBar({
   showDiff: boolean
   committed: boolean
   onToggleDiff: () => void
+  onPreviousChange: () => void
+  onNextChange: () => void
 }) {
   let status: ReactNode = null
   if (doc?.status === 'ready') {
@@ -684,14 +771,39 @@ function StatusBar({
           <span className="grow" />
           {doc.status === 'ready' ? (
             <>
-              {diff && (diff.added > 0 || diff.removed > 0) ? (
-                <Data
-                  className="text-ink-muted"
-                  title={committed ? 'Changes since the last commit' : 'Changes since the last save'}
-                >
-                  <span className="text-success">+{diff.added}</span>{' '}
-                  <span className="text-danger">−{diff.removed}</span>
-                </Data>
+              {hasChanges(diff) ? (
+                <>
+                  <span className="flex items-center">
+                    <button
+                      type="button"
+                      aria-label="Previous change"
+                      title="Previous change (Shift+Alt+F5)"
+                      onClick={onPreviousChange}
+                      className={stepClass}
+                    >
+                      <ChevronLeftIcon size={14} />
+                    </button>
+                    <button
+                      type="button"
+                      aria-label="Next change"
+                      title="Next change (Alt+F5)"
+                      onClick={onNextChange}
+                      className={stepClass}
+                    >
+                      <ChevronLeftIcon size={14} className="rotate-180" />
+                    </button>
+                  </span>
+                  <Spec>
+                    {diff.current ? `CHANGE ${diff.current}/${diff.changes}` : `${diff.changes} CHANGES`}
+                  </Spec>
+                  <Data
+                    className="text-ink-muted"
+                    title={committed ? 'Changes since the last commit' : 'Changes since the last save'}
+                  >
+                    <span className="text-success">+{diff.added}</span>{' '}
+                    <span className="text-danger">−{diff.removed}</span>
+                  </Data>
+                </>
               ) : null}
               <button
                 type="button"
