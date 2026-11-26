@@ -45,6 +45,31 @@
   pre {
     margin: 0;
   }
+  /* Scrollbars stay hidden until the pointer is over a scrolling area. Only the colour changes, so the
+     bar keeps its width (no layout shift) and wheel, touch and keyboard scrolling are untouched. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: transparent transparent;
+  }
+  *:hover {
+    scrollbar-color: var(--line-strong) transparent;
+  }
+  /* WebKit fallback for engines without scrollbar-color (older WKWebView, webkit2gtk). */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: transparent;
+    border-radius: 9999px;
+  }
+  *:hover::-webkit-scrollbar-thumb {
+    background: var(--line-strong);
+  }
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
   [data-tauri-drag-region] {
     -webkit-user-select: none;
     user-select: none;
