@@ -31,9 +31,11 @@ const desktop = [
   ['08-merged', '/missions/m-013/merged'],
   ['09-map', '/missions/m-014/map'],
   ['10-board', '/board'],
+  ['11-git', '/git'],
 ]
 const phone = [
   ['home', '/'],
+  ['git', '/git'],
   ['thread', '/missions/m-014'],
   ['review', '/missions/m-015/review'],
 ]

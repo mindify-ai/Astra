@@ -1,4 +1,4 @@
-import { merge, type RaceResult } from '@astra/client'
+import type { RaceResult } from '@astra/client'
 import {
   AgentGlyph,
   Avatar,
@@ -15,9 +15,10 @@ import {
   Spec,
   Status,
 } from '@astra/ui'
-import { Link, useNavigate } from '@tanstack/react-router'
-import { useAstraState, useClient } from '../context'
+import { Link } from '@tanstack/react-router'
+import { useAstraState } from '../context'
 import { agentOf, canApprove, hhmm, members, missionNo, roleLetter, roleName } from '../select'
+import { MergeNotice, useResultMerge } from '../shared/git'
 import { messagesOf } from '../shared/thread'
 import { AppHeader, Page, ShareButton } from '../shell/AppHeader'
 import { MissionNotFound, useMissionPresence } from './common'
@@ -53,14 +54,9 @@ export const checksStatus = (r: Pick<RaceResult, 'checks'>) =>
 
 function ResultCard({ result, merged }: { result: RaceResult; merged: boolean }) {
   const s = useAstraState()
-  const client = useClient()
-  const navigate = useNavigate()
+  const action = useResultMerge(result)
   const ma = s.missionAgents[result.missionAgentId]
   const allowed = canApprove(s, s.me, result.missionId, result.missionAgentId)
-  const doMerge = async () => {
-    await merge(client, result.id)
-    void navigate({ to: '/missions/$missionId/merged', params: { missionId: result.missionId } })
-  }
   return (
     <article
       className={cx(
@@ -78,12 +74,13 @@ function ResultCard({ result, merged }: { result: RaceResult; merged: boolean })
         <Data className="text-ink-muted">{formatDiffStats(result.stats)}</Data>
         {checksStatus(result)}
       </div>
+      <MergeNotice action={action} />
       <DiffView files={result.diff} className="grow" />
       <div className="flex flex-wrap items-center gap-4 border-t border-line p-4">
         <Button
           variant={result.reviewerPick ? 'primary' : 'outline'}
-          onClick={doMerge}
-          disabled={!allowed || merged}
+          onClick={action.doMerge}
+          disabled={!allowed || merged || action.busy}
           title={allowed ? undefined : 'Only the owner can merge'}
         >
           Merge {result.label}

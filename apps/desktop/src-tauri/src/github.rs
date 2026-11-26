@@ -242,6 +242,121 @@ pub async fn repos(token: &str) -> Result<Vec<Repo>, &'static str> {
     Ok(out)
 }
 
+/// A pull request, without credentials or API-only fields.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequest {
+    pub number: u64,
+    pub title: String,
+    pub head: String,
+    pub base: String,
+    pub url: String,
+    pub state: String,
+    pub mergeable: String,
+    pub local_head: bool,
+}
+pub fn parse_pull_request(status: u16, v: &Value) -> Result<PullRequest, &'static str> {
+    if status == 401 {
+        return Err("signedOut");
+    }
+    if status != 200 && status != 201 {
+        return Err("server");
+    }
+    let text = |value: &Value, key: &str| value[key].as_str().map(str::to_owned).ok_or("server");
+    let local_head = v["head"]["repo"]["full_name"]
+        .as_str()
+        .zip(v["base"]["repo"]["full_name"].as_str())
+        .is_some_and(|(a, b)| a.eq_ignore_ascii_case(b));
+    let head = if local_head {
+        text(&v["head"], "ref")?
+    } else {
+        text(&v["head"], "label")?
+    };
+    let url = text(v, "html_url")?;
+    if !url.starts_with("https://github.com/") {
+        return Err("server");
+    }
+    Ok(PullRequest {
+        number: v["number"].as_u64().ok_or("server")?,
+        title: text(v, "title")?,
+        head,
+        base: text(&v["base"], "ref")?,
+        url,
+        state: text(v, "state")?,
+        mergeable: match v["mergeable"].as_bool() {
+            Some(true) => "clean",
+            Some(false) => "conflicts",
+            None => "unknown",
+        }
+        .into(),
+        local_head,
+    })
+}
+pub fn parse_pull_requests(status: u16, v: &Value) -> Result<Vec<PullRequest>, &'static str> {
+    if status == 401 {
+        return Err("signedOut");
+    }
+    if status != 200 {
+        return Err("server");
+    }
+    v.as_array()
+        .ok_or("server")?
+        .iter()
+        .map(|pr| parse_pull_request(200, pr))
+        .collect()
+}
+pub async fn pull_requests(token: &str, full_name: &str) -> Result<Vec<PullRequest>, &'static str> {
+    if !valid_full_name(full_name) {
+        return Err("server");
+    }
+    let http = client()?;
+    let mut out = Vec::new();
+    for page in 1..=5 {
+        let (status, v) = send(
+            http.get(format!(
+                "{API_BASE}/repos/{full_name}/pulls?state=open&per_page=100&page={page}"
+            ))
+            .bearer_auth(token),
+        )
+        .await?;
+        let batch = parse_pull_requests(status, &v)?;
+        let done = batch.len() < 100;
+        // The list endpoint doesn't include mergeability; fetch each PR's detail.
+        for pr in batch {
+            let (status, v) = send(
+                http.get(format!("{API_BASE}/repos/{full_name}/pulls/{}", pr.number))
+                    .bearer_auth(token),
+            )
+            .await?;
+            out.push(parse_pull_request(status, &v)?);
+        }
+        if done {
+            break;
+        }
+    }
+    Ok(out)
+}
+pub async fn create_pull_request(
+    token: &str,
+    full_name: &str,
+    head: &str,
+    base: &str,
+    title: &str,
+    body: &str,
+) -> Result<PullRequest, &'static str> {
+    if !valid_full_name(full_name) || title.trim().is_empty() {
+        return Err("server");
+    }
+    let (status, v) = send(
+        client()?
+            .post(format!("{API_BASE}/repos/{full_name}/pulls"))
+            .bearer_auth(token)
+            .json(&json!({ "head": head, "base": base, "title": title, "body": body })),
+    )
+    .await?;
+    parse_pull_request(status, &v)
+}
+
 /// `owner/name`, as GitHub allows them; anything else could smuggle a path or a flag into `git clone`.
 pub fn valid_full_name(full_name: &str) -> bool {
     let ok = |part: &str| {
@@ -395,6 +510,26 @@ mod tests {
             })
         );
         assert_eq!(parse_profile(401, &Value::Null), Err("server"));
+    }
+
+    #[test]
+    fn pull_request_parsing() {
+        let mut pr = json!({"number": 42, "title": "A change", "head": {"ref": "feature", "label": "org:feature", "repo": {"full_name": "org/repo"}}, "base": {"ref": "main", "repo": {"full_name": "org/repo"}}, "html_url": "https://github.com/org/repo/pull/42", "state": "open", "mergeable": null});
+        assert_eq!(parse_pull_request(200, &pr).unwrap().mergeable, "unknown");
+        pr["mergeable"] = json!(false);
+        assert_eq!(parse_pull_request(200, &pr).unwrap().mergeable, "conflicts");
+        pr["mergeable"] = json!(true);
+        assert_eq!(parse_pull_request(201, &pr).unwrap().mergeable, "clean");
+        assert_eq!(
+            parse_pull_requests(200, &json!([pr.clone()]))
+                .unwrap()
+                .len(),
+            1
+        );
+        pr["head"]["repo"]["full_name"] = json!("fork/repo");
+        assert!(!parse_pull_request(200, &pr).unwrap().local_head);
+        assert_eq!(parse_pull_requests(401, &Value::Null), Err("signedOut"));
+        assert!(parse_pull_request(200, &json!({})).is_err());
     }
 
     #[test]

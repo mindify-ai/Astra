@@ -3,6 +3,7 @@ import type {
   Auth,
   Connectivity,
   FilesHost,
+  GitHost,
   GithubHost,
   Person,
   Session,
@@ -124,6 +125,7 @@ export interface HostCapabilities {
   terminal?: TerminalHost
   /** Reads and writes the repository's files for the code editor (desktop app). */
   files?: FilesHost
+  git?: GitHost
 }
 
 const HostContext = createContext<HostCapabilities>({})

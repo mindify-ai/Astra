@@ -35,7 +35,7 @@ export function useLinkRenderer(): LinkRenderer {
   )
 }
 
-export type MobileTab = 'home' | 'missions' | 'agents' | 'people'
+export type MobileTab = 'home' | 'missions' | 'agents' | 'people' | 'git'
 
 export function MobileTabs({ active }: { active: MobileTab }) {
   const { mobileVariant } = usePlatform()
@@ -57,6 +57,7 @@ export function MobileTabs({ active }: { active: MobileTab }) {
           active: active === 'missions',
         },
         { key: 'agents', label: 'Agents', icon: <ChipIcon />, to: '/agents', active: active === 'agents' },
+        { key: 'git', label: 'Git', icon: <ListIcon />, to: '/git', active: active === 'git' },
         { key: 'people', label: 'People', icon: <UsersIcon />, to: '/people', active: active === 'people' },
       ]}
     />

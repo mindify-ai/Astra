@@ -8,12 +8,20 @@ import {
   type RouterHistory,
 } from '@tanstack/react-router'
 import { useAstraState, usePlatform } from './context'
-import { MobileAgents, MobileHome, MobilePeople, MobileReview, MobileThread } from './mobile/MobileScreens'
+import {
+  MobileAgents,
+  MobileGit,
+  MobileHome,
+  MobilePeople,
+  MobileReview,
+  MobileThread,
+} from './mobile/MobileScreens'
 import { AccountSignIn } from './screens/AccountSignIn'
 import { Board } from './screens/Board'
 import { CodeReview } from './screens/CodeReview'
 import { Connect } from './screens/Connect'
 import { Editor } from './screens/Editor'
+import { Git } from './screens/Git'
 import { Home } from './screens/Home'
 import { Launch } from './screens/Launch'
 import { MapView } from './screens/Map'
@@ -135,6 +143,11 @@ const mergedRoute = createRoute({
   },
 })
 const boardRoute = createRoute({ getParentRoute: () => rootRoute, path: '/board', component: Board })
+const gitRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/git',
+  component: () => <Adaptive desktop={<Git />} mobile={<MobileGit />} />,
+})
 const codeRoute = createRoute({ getParentRoute: () => rootRoute, path: '/code', component: Editor })
 const agentsRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -160,6 +173,7 @@ const routeTree = rootRoute.addChildren([
   codeReviewRoute,
   mergedRoute,
   boardRoute,
+  gitRoute,
   codeRoute,
   agentsRoute,
   peopleRoute,

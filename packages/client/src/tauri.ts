@@ -1,5 +1,6 @@
 import type { RedirectDriver, Session } from './auth'
 import type { FileEntry, FilesHost } from './files'
+import { type GitHost, gitError } from './git'
 import { HlcClock } from './hlc'
 import { Store } from './store'
 import type { TerminalHost } from './terminal'
@@ -188,4 +189,26 @@ export const tauriFiles: FilesHost = {
     const { invoke } = await import('@tauri-apps/api/core')
     return invoke<string | null>('files_base', { root, path })
   },
+}
+
+const gitInvoke = async <T>(cmd: string, args: Record<string, unknown>): Promise<T> => {
+  const { invoke } = await import('@tauri-apps/api/core')
+  try {
+    return await invoke<T>(cmd, args)
+  } catch (e) {
+    throw gitError(e)
+  }
+}
+export const tauriGit: GitHost = {
+  status: (root) => gitInvoke('git_status', { root }),
+  log: (root, limit) => gitInvoke('git_log', { root, limit }),
+  branches: (root) => gitInvoke('git_branches', { root }),
+  tags: (root) => gitInvoke('git_tags', { root }),
+  commit: (root, message) => gitInvoke('git_commit', { root, message }),
+  pull: (root) => gitInvoke('git_pull', { root }),
+  push: (root) => gitInvoke('git_push', { root }),
+  createTag: (root, name, message) => gitInvoke('git_create_tag', { root, name, message }),
+  checkMerge: (root, branch, into) => gitInvoke('git_check_merge', { root, branch, into }),
+  pullRequests: (root) => gitInvoke('git_pull_requests', { root }),
+  createPullRequest: (root, draft) => gitInvoke('git_create_pull_request', { root, draft }),
 }

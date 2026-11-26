@@ -1,4 +1,4 @@
-import { createMission, type MissionMode, merge, sendMessage } from '@astra/client'
+import { createMission, type MissionMode, sendMessage } from '@astra/client'
 import {
   ArrowUpIcon,
   Avatar,
@@ -21,6 +21,7 @@ import { useRouter } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { useAstraState, useClient, useHost, usePlatform, useUi } from '../context'
 import { useMissionPresence } from '../screens/common'
+import { GitContent } from '../screens/Git'
 import { useNeedsYou } from '../screens/Home'
 import { checksStatus, resultsOf, useVerdict } from '../screens/Review'
 import {
@@ -35,6 +36,7 @@ import {
   orderedMissions,
   roleName,
 } from '../select'
+import { MergeNotice, useResultMerge } from '../shared/git'
 import { latestPerAgent, MessageItem, messagesOf } from '../shared/thread'
 import { defaultTeam } from '../team'
 import { BrandBar, MissionTopBar, MobileFrame, MobileTabs, useLinkRenderer } from './MobileShell'
@@ -226,8 +228,6 @@ export function MobileThread({ missionId }: { missionId: string }) {
 
 export function MobileReview({ missionId }: { missionId: string }) {
   const s = useAstraState()
-  const client = useClient()
-  const router = useRouter()
   const render = useLinkRenderer()
   const { mobileVariant } = usePlatform()
   const mission = s.missions[missionId]
@@ -235,17 +235,13 @@ export function MobileReview({ missionId }: { missionId: string }) {
   const verdict = useVerdict(missionId)
   const [pick, setPick] = useState<string | null>(null)
   useMissionPresence(missionId, 'Comparing results')
-  if (!mission) return <MobileMissing />
   const current = results.find((r) => r.id === pick) ?? results.find((r) => r.reviewerPick) ?? results[0]
+  const mergeAction = useResultMerge(current)
+  if (!mission) return <MobileMissing />
   const ma = current ? s.missionAgents[current.missionAgentId] : undefined
   const ios = mobileVariant === 'ios'
   const options = results.map((r) => ({ value: r.id, label: `Result ${r.label}` }))
   const allowed = canApprove(s, s.me, missionId, current?.missionAgentId) && mission.status !== 'merged'
-  const doMerge = async () => {
-    if (!current) return
-    await merge(client, current.id)
-    router.history.push('/')
-  }
 
   return (
     <MobileFrame
@@ -270,7 +266,12 @@ export function MobileReview({ missionId }: { missionId: string }) {
                   children: 'Open thread',
                 })
               : null}
-            <Button size="touch" className={ios ? 'w-full' : 'px-6'} onClick={doMerge} disabled={!allowed}>
+            <Button
+              size="touch"
+              className={ios ? 'w-full' : 'px-6'}
+              onClick={mergeAction.doMerge}
+              disabled={!allowed || mergeAction.busy}
+            >
               {mission.status === 'merged' ? 'Merged' : `Merge ${current.label}`}
             </Button>
           </div>
@@ -284,6 +285,7 @@ export function MobileReview({ missionId }: { missionId: string }) {
         </Eyebrow>
         <h1 className="m-0 text-title">{mission.title}</h1>
       </div>
+      <MergeNotice action={mergeAction} />
       {verdict ? (
         <section
           aria-label="Reviewer"
@@ -398,6 +400,14 @@ function MobileMissing() {
   return (
     <MobileFrame top={<BrandBar />} bottom={<MobileTabs active="missions" />} className="px-4 py-8">
       <p className="m-0 text-ink-muted">This mission is not here. It may still be syncing.</p>
+    </MobileFrame>
+  )
+}
+
+export function MobileGit() {
+  return (
+    <MobileFrame top={<BrandBar />} bottom={<MobileTabs active="git" />} className="px-4 pt-2 pb-6">
+      <GitContent mobile />
     </MobileFrame>
   )
 }

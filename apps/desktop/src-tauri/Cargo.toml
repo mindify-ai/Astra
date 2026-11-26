@@ -24,6 +24,7 @@ tauri-plugin-clipboard-manager = "2.5.0"
 tauri-plugin-opener = "2.7.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+time = { version = "0.3", features = ["formatting"] }
 tokio = { version = "1", features = ["sync"] }
 # Signing in with GitHub from the app (device flow; same build as the runtime's).
 reqwest = { version = "0.13", default-features = false, features = ["json", "form", "rustls"] }
@@ -40,7 +41,7 @@ portable-pty = "0.9.0"
 # The GitHub token for listing and cloning your repositories (OS keychain; same version as the runtime's).
 keyring = "4"
 # The code editor's diff against the last commit (same build as the runtime's).
-git2 = { version = "0.21", default-features = false, features = ["vendored-libgit2"] }
+git2 = { version = "0.21", default-features = false, features = ["vendored-libgit2", "https"] }
 
 [profile.release]
 lto = "thin"

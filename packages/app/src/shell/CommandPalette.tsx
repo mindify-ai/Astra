@@ -114,6 +114,13 @@ export function CommandPalette() {
       },
       { id: 'board', group: 'Go to', label: 'Board', keywords: 'tasks kanban', run: go('/board') },
       {
+        id: 'git',
+        group: 'Go to',
+        label: 'Git',
+        keywords: 'version branch pull request pr merge conflict tag',
+        run: go('/git'),
+      },
+      {
         id: 'agents',
         group: 'Go to',
         label: 'Connect agents',
