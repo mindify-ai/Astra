@@ -1,6 +1,7 @@
 export * from './actions'
 export * from './auth'
 export { type FileEntry, type FilesHost, HIDDEN_DIRS, memoryFiles, relativeSegments } from './files'
+export * from './git'
 export {
   type GithubHost,
   type GithubRepo,
@@ -22,6 +23,7 @@ export {
   type NodeInfo,
   TauriClient,
   tauriFiles,
+  tauriGit,
   tauriLoopback,
   tauriTerminal,
 } from './tauri'

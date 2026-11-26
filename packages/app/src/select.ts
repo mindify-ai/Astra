@@ -173,3 +173,53 @@ export function missionRoute(
     return '/missions/$missionId/review'
   return '/missions/$missionId'
 }
+
+/** Unmerged mission results in this repository, newest mission first. */
+export function gitResults(s: State, repoId: Id) {
+  return Object.values(s.results)
+    .filter((r) => {
+      const m = s.missions[r.missionId]
+      return m?.repoId === repoId && !m.archivedAt && m.status !== 'merged' && !s.merges[m.id]
+    })
+    .sort(
+      (a, b) =>
+        (s.missions[b.missionId]?.number ?? 0) - (s.missions[a.missionId]?.number ?? 0) ||
+        a.label.localeCompare(b.label),
+    )
+}
+
+export function gitMergeRows(s: State, repoId: Id, prs: import('@astra/client').PullRequest[]) {
+  const results = gitResults(s, repoId)
+  return [
+    ...results.map((result) => ({
+      key: result.id,
+      title: s.missions[result.missionId]?.title ?? result.branch,
+      branch: result.branch,
+      into: s.missions[result.missionId]?.baseBranch ?? 'main',
+      result,
+      pr: prs.find(
+        (p) =>
+          p.localHead !== false &&
+          p.head === result.branch &&
+          p.base === s.missions[result.missionId]?.baseBranch,
+      ),
+    })),
+    ...prs
+      .filter(
+        (p) =>
+          p.state === 'open' &&
+          !results.some(
+            (r) =>
+              p.localHead !== false && r.branch === p.head && s.missions[r.missionId]?.baseBranch === p.base,
+          ),
+      )
+      .map((pr) => ({
+        key: `pr-${pr.number}`,
+        title: pr.title,
+        branch: pr.head,
+        into: pr.base,
+        result: undefined,
+        pr,
+      })),
+  ]
+}

@@ -12,6 +12,8 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 mod files;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+mod git;
 mod github;
 mod loopback;
 mod terminal;
@@ -697,6 +699,28 @@ pub fn run() {
             files::files_list,
             files::files_read,
             files::files_write,
+            #[cfg(not(any(target_os = "ios", target_os = "android")))]
+            git::git_status,
+            #[cfg(not(any(target_os = "ios", target_os = "android")))]
+            git::git_log,
+            #[cfg(not(any(target_os = "ios", target_os = "android")))]
+            git::git_branches,
+            #[cfg(not(any(target_os = "ios", target_os = "android")))]
+            git::git_tags,
+            #[cfg(not(any(target_os = "ios", target_os = "android")))]
+            git::git_commit,
+            #[cfg(not(any(target_os = "ios", target_os = "android")))]
+            git::git_pull,
+            #[cfg(not(any(target_os = "ios", target_os = "android")))]
+            git::git_push,
+            #[cfg(not(any(target_os = "ios", target_os = "android")))]
+            git::git_create_tag,
+            #[cfg(not(any(target_os = "ios", target_os = "android")))]
+            git::git_check_merge,
+            #[cfg(not(any(target_os = "ios", target_os = "android")))]
+            git::git_pull_requests,
+            #[cfg(not(any(target_os = "ios", target_os = "android")))]
+            git::git_create_pull_request,
             files::files_base
         ])
         .run(tauri::generate_context!())

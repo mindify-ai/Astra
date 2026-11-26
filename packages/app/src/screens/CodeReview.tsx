@@ -1,4 +1,4 @@
-import { type DiffFile, type Message, merge, type RaceResult, type State, sendMessage } from '@astra/client'
+import { type DiffFile, type Message, type RaceResult, type State, sendMessage } from '@astra/client'
 import {
   AgentGlyph,
   Avatar,
@@ -23,10 +23,11 @@ import {
   TextArea,
   useResizable,
 } from '@astra/ui'
-import { Link, useNavigate } from '@tanstack/react-router'
+import { Link } from '@tanstack/react-router'
 import { Fragment, type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 import { useAstraState, useClient } from '../context'
 import { agentOf, canApprove, canSteer, hhmm, members, missionNo, roleLetter, roleName } from '../select'
+import { MergeNotice, useResultMerge } from '../shared/git'
 import {
   anchorOf,
   fileStats,
@@ -436,7 +437,7 @@ function ReviewBody({ missionId, result }: { missionId: string; result: RaceResu
   const s = useAstraState()
   const verdict = useVerdict(missionId)
   const client = useClient()
-  const navigate = useNavigate()
+  const mergeAction = useResultMerge(result)
   const mission = s.missions[missionId]
   const files = result.diff
   const label = result.label
@@ -529,10 +530,6 @@ function ReviewBody({ missionId, result }: { missionId: string; result: RaceResu
     setRequesting(false)
     if (outcome && !outcome.ok) setNotice(outcome.error ?? 'The request was posted but not delivered.')
   }
-  const doMerge = async () => {
-    await merge(client, result.id)
-    void navigate({ to: '/missions/$missionId/merged', params: { missionId } })
-  }
 
   return (
     <Page
@@ -545,6 +542,7 @@ function ReviewBody({ missionId, result }: { missionId: string; result: RaceResu
         />
       }
     >
+      <MergeNotice action={mergeAction} />
       <section aria-label="Summary" className="flex flex-col gap-4 border-b border-line px-8 pt-6 pb-4">
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div className="flex flex-col gap-2">
@@ -574,8 +572,8 @@ function ReviewBody({ missionId, result }: { missionId: string; result: RaceResu
             </Button>
             <Button
               size="sm"
-              onClick={doMerge}
-              disabled={!allowed || merged}
+              onClick={mergeAction.doMerge}
+              disabled={!allowed || merged || mergeAction.busy}
               title={allowed ? undefined : 'Only the owner can merge'}
             >
               Approve &amp; merge

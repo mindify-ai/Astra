@@ -6,6 +6,7 @@ import {
   starterSeed,
   TauriClient,
   tauriFiles,
+  tauriGit,
   tauriGithub,
   tauriLoopback,
   tauriTerminal,
@@ -109,6 +110,7 @@ function startNode() {
               signOut: signedIn ? () => void TauriClient.signOut() : undefined,
               terminal: desktop ? tauriTerminal : undefined,
               files: desktop ? tauriFiles : undefined,
+              git: desktop ? tauriGit : undefined,
             }}
           />
         </StrictMode>,

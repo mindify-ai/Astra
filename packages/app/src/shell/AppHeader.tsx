@@ -8,7 +8,7 @@ import { currentMissionId } from '../select'
 import { PaletteButton } from './CommandPalette'
 import { TerminalButton } from './Terminal'
 
-export type View = 'thread' | 'map' | 'board'
+export type View = 'thread' | 'map' | 'board' | 'git'
 
 export interface AppHeaderProps {
   /** Repository switcher in the bar (most screens). */
@@ -66,6 +66,9 @@ function AppMenu() {
           </Link>
           <Link role="menuitem" to="/board" className={item} onClick={() => setOpen(false)}>
             Board
+          </Link>
+          <Link role="menuitem" to="/git" className={item} onClick={() => setOpen(false)}>
+            Git
           </Link>
           <Link role="menuitem" to="/setup/agents" className={item} onClick={() => setOpen(false)}>
             Connect agents
@@ -170,7 +173,11 @@ export function AppHeader({ repoSelect, nav, step, byline, people, actions, bord
       )
     }
     return (
-      <Link to="/board" aria-current={active ? 'page' : undefined} className={cls}>
+      <Link
+        to={view === 'git' ? '/git' : '/board'}
+        aria-current={active ? 'page' : undefined}
+        className={cls}
+      >
         {label}
       </Link>
     )
@@ -218,6 +225,7 @@ export function AppHeader({ repoSelect, nav, step, byline, people, actions, bord
           {navItem('thread', 'THREAD')}
           {navItem('map', 'MAP')}
           {navItem('board', 'BOARD')}
+          {navItem('git', 'GIT')}
         </nav>
       ) : null}
       <div data-tauri-drag-region className="h-14 grow" />

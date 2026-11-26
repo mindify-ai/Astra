@@ -193,11 +193,14 @@ export async function sendMessage(
 /** A new side-thread id for `sendMessage`. */
 export const newSideThreadId = () => `side-${ulid().toLowerCase()}`
 
-export function merge(client: AstraClient, resultId: Id) {
+export async function merge(client: AstraClient, resultId: Id): Promise<CommandOutcome | null> {
   const state = client.getState()
   const r = state.results[resultId]
-  if (!r) return Promise.resolve([])
-  return client.submit([command(nodeForMission(state, r.missionId), { type: 'merge', resultId })])
+  if (!r) return null
+  return outcomeOf(
+    client,
+    await client.submit([command(nodeForMission(state, r.missionId), { type: 'merge', resultId })]),
+  )
 }
 
 export function agentCommand(
@@ -388,4 +391,33 @@ export function invite(client: AstraClient, missionId: Id, email: string, access
     entity: { kind: 'membership', id: `${missionId}:${personId}`, missionId, personId, access },
   })
   return client.submit(bodies)
+}
+
+/** Starts a reviewable repair on a new branch, based on the branch that needs the fix. */
+export async function resolveConflicts(
+  client: AstraClient,
+  draft: { repoId: Id; branch: string; into: string; files: string[] },
+): Promise<Id> {
+  const state = client.getState()
+  if (!state.repositories[draft.repoId]) throw new Error('Repository not found.')
+  const node = defaultRunner(state, client.nodeId)
+  const connected = Object.values(state.agents).filter((a) => a.status === 'connected')
+  const builders = Object.values(state.missionAgents).filter((a) => a.role === 'builder')
+  const agent =
+    connected.find((a) => a.nodeId === node && builders.some((b) => b.agentId === a.id)) ??
+    connected.find((a) => a.nodeId === node) ??
+    connected[0]
+  if (!agent) throw new Error('Connect an agent before resolving conflicts.')
+  // Quote refs as shell arguments; branch names are data, never shell commands.
+  const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`
+  return createMission(client, {
+    repoId: draft.repoId,
+    baseBranch: draft.branch,
+    title: `Resolve conflicts: ${draft.branch} → ${draft.into}`,
+    goal: `Run git merge ${quote(draft.into)} on the mission worktree based on ${quote(draft.branch)}. Resolve these conflicting files, preserving what both sides meant:\n${draft.files.map((f) => `- ${f}`).join('\n')}\nRun the repository's tests and commit the resolution. Do not push. Leave the result for a human to review and merge back into ${quote(draft.branch)}.`,
+    branch: `astra/resolve-conflicts-${ulid().slice(-8).toLowerCase()}`,
+    // A split mission with one builder is the existing protocol's solo execution.
+    mode: 'split',
+    agents: [{ agentId: agent.id, role: 'builder', enabled: true }],
+  })
 }
