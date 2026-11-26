@@ -1,11 +1,11 @@
 import { demoSeed, type FilesHost, MockClient, memoryFiles, type SeedFile } from '@astra/client'
-import { EditorView } from '@codemirror/view'
+import { EditorView, runScopeHandlers } from '@codemirror/view'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { AstraApp } from '../src'
 import type { HostCapabilities } from '../src/context'
-import { demoFiles } from '../src/screens/Editor'
+import { demoFiles, editedFolders } from '../src/screens/Editor'
 
 /** The demo workspace, with its first repository (gateway) checked out at `path`. */
 const seedWith = (path: string | null): SeedFile => ({
@@ -240,6 +240,80 @@ describe('code editor', () => {
     await user.keyboard('{Meta>}s{/Meta}')
     await within(status).findByText('SAVED')
     await waitFor(() => expect(added()).toBeNull())
+  })
+
+  it('marks edited files and the folders above them in the explorer', async () => {
+    const files = spyFiles({ 'src/lib/a.ts': 'a', 'b.ts': 'b' })
+    mount({ files })
+    const user = userEvent.setup()
+    const tree = await screen.findByRole('tree', { name: 'Files' })
+    await user.click(within(tree).getByRole('treeitem', { name: 'src' }))
+    await user.click(await within(tree).findByRole('treeitem', { name: 'lib' }))
+    await user.click(await within(tree).findByRole('treeitem', { name: 'a.ts' }))
+    await typeAtEnd(await editorFor('src/lib/a.ts'), '!')
+
+    expect(within(tree).getByRole('treeitem', { name: 'a.ts, unsaved' })).toBeTruthy()
+    expect(within(tree).getByRole('treeitem', { name: 'src, contains edits' })).toBeTruthy()
+    expect(within(tree).getByRole('treeitem', { name: 'lib, contains edits' })).toBeTruthy()
+    // Untouched files keep their plain names.
+    expect(within(tree).getByRole('treeitem', { name: 'b.ts' })).toBeTruthy()
+
+    await user.keyboard('{Meta>}s{/Meta}')
+    expect(await within(tree).findByRole('treeitem', { name: 'a.ts' })).toBeTruthy()
+    expect(within(tree).queryByRole('treeitem', { name: /contains edits/ })).toBeNull()
+  })
+
+  it('shows where in the file the changes are and steps through them', async () => {
+    const files = memoryFiles(
+      { 'a.ts': 'one\nTWO\nthree\nfour\nfive\nSIX' },
+      { 'a.ts': 'one\ntwo\nthree\nfour\nfive\nsix' },
+    )
+    mount({ files })
+    const user = userEvent.setup()
+    const tree = await screen.findByRole('tree', { name: 'Files' })
+    await user.click(within(tree).getByRole('treeitem', { name: 'a.ts' }))
+    const editor = await editorFor('a.ts')
+    const status = document.querySelector('section[aria-label="Editor"] footer') as HTMLElement
+
+    // Which file: saved, but changed since the last commit.
+    expect(await within(tree).findByRole('treeitem', { name: 'a.ts, changed' })).toBeTruthy()
+    expect(fileTabs().getByRole('tab', { name: 'a.ts' }).title).toMatch(/^a\.ts · \+\d+ −\d+$/)
+
+    // Where: a marker per change in the strip beside the editor, and a count in the status bar.
+    expect(await within(status).findByText('2 CHANGES')).toBeTruthy()
+    const markers = () =>
+      [...document.querySelectorAll<HTMLButtonElement>('[data-change-overview] button')].map((b) => b.title)
+    expect(markers()).toEqual(['Go to the change on line 2', 'Go to the change on line 6'])
+
+    await user.click(within(status).getByRole('button', { name: 'Next change' }))
+    expect(within(status).getByText('LN 2, COL 1')).toBeTruthy()
+    expect(within(status).getByText('CHANGE 1/2')).toBeTruthy()
+    await user.click(within(status).getByRole('button', { name: 'Next change' }))
+    expect(within(status).getByText('LN 6, COL 1')).toBeTruthy()
+    expect(within(status).getByText('CHANGE 2/2')).toBeTruthy()
+    await user.click(within(status).getByRole('button', { name: 'Previous change' }))
+    expect(within(status).getByText('LN 2, COL 1')).toBeTruthy()
+
+    // Alt+F5 in the editor goes to the next change too.
+    act(() => {
+      runScopeHandlers(editor, new KeyboardEvent('keydown', { key: 'F5', altKey: true }), 'editor')
+    })
+    expect(within(status).getByText('LN 6, COL 1')).toBeTruthy()
+
+    // Clicking a marker jumps to its change.
+    const first = document.querySelector<HTMLButtonElement>('[data-change-overview] button')
+    await user.click(first as HTMLButtonElement)
+    expect(within(status).getByText('LN 2, COL 1')).toBeTruthy()
+
+    // With the diff off there is nothing to show.
+    await user.click(within(status).getByRole('button', { name: 'DIFF' }))
+    expect(markers()).toEqual([])
+    expect(within(status).queryByRole('button', { name: 'Next change' })).toBeNull()
+    expect(within(tree).getByRole('treeitem', { name: 'a.ts' })).toBeTruthy()
+  })
+
+  it('lists the folders above edited files', () => {
+    expect([...editedFolders(['src/lib/a.ts', 'src/b.ts', 'c.ts'])].sort()).toEqual(['src', 'src/lib'])
   })
 
   it('says so when the repository has no local folder', async () => {

@@ -1,3 +1,4 @@
+import { cx } from '@astra/ui'
 import {
   autocompletion,
   closeBrackets,
@@ -26,7 +27,13 @@ import {
 import { dockerFile } from '@codemirror/legacy-modes/mode/dockerfile'
 import { shell } from '@codemirror/legacy-modes/mode/shell'
 import { toml } from '@codemirror/legacy-modes/mode/toml'
-import { getChunks, getOriginalDoc, unifiedMergeView } from '@codemirror/merge'
+import {
+  getChunks,
+  getOriginalDoc,
+  goToNextChunk,
+  goToPreviousChunk,
+  unifiedMergeView,
+} from '@codemirror/merge'
 import { highlightSelectionMatches, search, searchKeymap } from '@codemirror/search'
 import { Compartment, EditorState, type Extension } from '@codemirror/state'
 import {
@@ -42,7 +49,7 @@ import {
   rectangularSelection,
 } from '@codemirror/view'
 import { tags as t } from '@lezer/highlight'
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 // ── Languages ──────────────────────────────────────────────────────────────
 
@@ -318,6 +325,10 @@ export function diffExtension(original: string): Extension {
 export interface DiffCount {
   added: number
   removed: number
+  /** How many separate changes the file has. */
+  changes: number
+  /** Which change (1-based) the cursor is in, or null when it is outside every change. */
+  current: number | null
 }
 
 const linesIn = (text: string) => (text ? text.split('\n').length - (text.endsWith('\n') ? 1 : 0) : 0)
@@ -327,13 +338,53 @@ export function diffCount(state: EditorState): DiffCount | null {
   const result = getChunks(state)
   if (!result) return null
   const original = getOriginalDoc(state)
+  const head = state.selection.main.head
   let added = 0
   let removed = 0
-  for (const c of result.chunks) {
+  let current: number | null = null
+  result.chunks.forEach((c, i) => {
     added += linesIn(state.doc.sliceString(c.fromB, Math.min(c.toB, state.doc.length)))
     removed += linesIn(original.sliceString(c.fromA, Math.min(c.toA, original.length)))
-  }
-  return { added, removed }
+    if (current === null && head >= c.fromB && (head < c.toB || head === c.fromB)) current = i + 1
+  })
+  return { added, removed, changes: result.chunks.length, current }
+}
+
+export interface ChangeMarker {
+  /** Where the change starts in the document. */
+  from: number
+  /** The first changed line (1-based). */
+  line: number
+  /** Top edge and height, as fractions of the whole file. */
+  top: number
+  height: number
+  kind: 'add' | 'del' | 'mod'
+}
+
+/** Where in the file each change sits, for the overview strip beside the editor. Empty when the diff is off. */
+export function changeMarkers(state: EditorState): ChangeMarker[] {
+  const result = getChunks(state)
+  if (!result) return []
+  const { doc } = state
+  const total = doc.lines
+  return result.chunks.map((c) => {
+    const from = Math.min(c.fromB, doc.length)
+    const to = Math.min(c.toB, doc.length)
+    const start = doc.lineAt(from).number
+    const end = to > from ? doc.lineAt(Math.max(from, to - 1)).number : start
+    const kind = c.fromA === c.toA ? 'add' : c.fromB === c.toB ? 'del' : 'mod'
+    return { from, line: start, top: (start - 1) / total, height: (end - start + 1) / total, kind }
+  })
+}
+
+/** Moves the cursor to the next change (wrapping round); false when there is nowhere to go. */
+export function nextChange(view: EditorView): boolean {
+  return goToNextChunk(view)
+}
+
+/** Moves the cursor to the previous change (wrapping round); false when there is nowhere to go. */
+export function previousChange(view: EditorView): boolean {
+  return goToPreviousChunk(view)
 }
 
 /** The editing features every file gets. */
@@ -373,6 +424,8 @@ function baseExtensions(): Extension[] {
       ...foldKeymap,
       ...completionKeymap,
       indentWithTab,
+      // Alt+F5 / Shift+Alt+F5 step through the changes (Alt+arrows already move lines).
+      { key: 'Alt-F5', run: goToNextChunk, shift: goToPreviousChunk, preventDefault: true },
     ]),
     astraTheme,
   ]
@@ -423,6 +476,7 @@ export function CodeEditor({
   onDiff?: (d: DiffCount | null) => void
 }) {
   const host = useRef<HTMLDivElement>(null)
+  const [markers, setMarkers] = useState<ChangeMarker[]>([])
   const view = useRef<EditorView | null>(null)
   const applied = useRef<string | null | undefined>(undefined)
   const callbacks = useRef({ onChange, onCursor, onDiff })
@@ -447,7 +501,8 @@ export function CodeEditor({
         ev.update(trs)
         if (trs.some((tr) => tr.docChanged)) callbacks.current.onChange(ev.state.doc.toString())
         if (trs.some((tr) => tr.selection || tr.docChanged)) report(ev)
-        if (trs.some((tr) => tr.docChanged || tr.effects.length > 0))
+        if (trs.some((tr) => tr.docChanged || tr.effects.length > 0)) setMarkers(changeMarkers(ev.state))
+        if (trs.some((tr) => tr.docChanged || tr.selection || tr.effects.length > 0))
           callbacks.current.onDiff?.(diffCount(ev.state))
       },
     })
@@ -472,5 +527,45 @@ export function CodeEditor({
     callbacks.current.onDiff?.(diffCount(v.state))
   }, [original])
 
-  return <div ref={host} className="min-h-0 grow overflow-hidden" />
+  const jump = (m: ChangeMarker) => {
+    const v = view.current
+    if (!v) return
+    v.dispatch({
+      selection: { anchor: m.from },
+      effects: EditorView.scrollIntoView(m.from, { y: 'center' }),
+      userEvent: 'select.byChunk',
+    })
+    v.focus()
+  }
+
+  return (
+    <div className="flex min-h-0 grow">
+      <div ref={host} className="min-h-0 min-w-0 grow overflow-hidden" />
+      {markers.length > 0 ? (
+        // Where the changes are in the whole file. Mouse only: the status bar's change buttons and Alt+F5 do
+        // the same from the keyboard.
+        <div
+          aria-hidden="true"
+          data-change-overview=""
+          className="relative w-2 shrink-0 border-l border-line bg-surface-sunken"
+        >
+          {markers.map((m) => (
+            <button
+              key={`${m.from}:${m.kind}`}
+              type="button"
+              tabIndex={-1}
+              title={`Go to the change on line ${m.line}`}
+              data-kind={m.kind}
+              onClick={() => jump(m)}
+              style={{ top: `${m.top * 100}%`, height: `max(3px, ${m.height * 100}%)` }}
+              className={cx(
+                'absolute inset-x-0.5 cursor-pointer rounded-none border-0 p-0',
+                m.kind === 'add' ? 'bg-success' : m.kind === 'del' ? 'bg-danger' : 'bg-warning',
+              )}
+            />
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )
 }
