@@ -30,23 +30,67 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with: { workspaces: apps/desktop/src-tauri }
       - run: pnpm install --frozen-lockfile
-      - uses: tauri-apps/tauri-action@v0
+      # macOS signing. Tauri treats an empty APPLE_* variable as set: an empty APPLE_SIGNING_IDENTITY overrides
+      # the ad-hoc identity ("-") in tauri.conf.json, and the app ships with no sealed bundle signature, which
+      # Gatekeeper reports as "Astra.app is damaged and can't be opened". So export the Apple variables only when
+      # the secrets exist. Without them the app is ad-hoc signed: it opens after "Open Anyway" instead of being
+      # rejected as damaged. With them it is signed with the Developer ID and notarized.
+      - name: Configure macOS signing
+        if: runner.os == 'macOS'
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Code signing (set these repository secrets to sign; unsigned builds still work for testing).
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          put() { { echo "$1<<__ASTRA_EOF__"; printenv "$1"; echo "__ASTRA_EOF__"; } >> "$GITHUB_ENV"; }
+          if [ -n "$APPLE_CERTIFICATE" ] && [ -n "$APPLE_CERTIFICATE_PASSWORD" ] && [ -n "$APPLE_SIGNING_IDENTITY" ]; then
+            put APPLE_CERTIFICATE; put APPLE_CERTIFICATE_PASSWORD; put APPLE_SIGNING_IDENTITY
+            echo "ASTRA_MAC_SIGNED=1" >> "$GITHUB_ENV"
+            if [ -n "$APPLE_ID" ] && [ -n "$APPLE_PASSWORD" ] && [ -n "$APPLE_TEAM_ID" ]; then
+              put APPLE_ID; put APPLE_PASSWORD; put APPLE_TEAM_ID
+              echo "Signing with the Developer ID and notarizing."
+            else
+              echo "::warning::Signing with the Developer ID but not notarizing (APPLE_ID, APPLE_PASSWORD or APPLE_TEAM_ID is missing). Gatekeeper will still block downloads."
+            fi
+          else
+            echo "::warning::No Developer ID secrets: the macOS app is ad-hoc signed. Users must allow it once in System Settings > Privacy & Security > Open Anyway."
+          fi
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           projectPath: apps/desktop
           tauriScript: pnpm tauri
           args: ${{ matrix.args }}
           tagName: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
           releaseName: Astra ${{ github.ref_name }}
+          releaseBody: |
+            **macOS:** if this build isn't notarized yet, macOS says Apple can't verify Astra the first time you open it.
+            Open **System Settings → Privacy & Security** and click **Open Anyway** (or run
+            `xattr -dr com.apple.quarantine /Applications/Astra.app` once).
           releaseDraft: true
+      # Fail the job (the release stays a draft) if the bundle's signature is broken, which is what makes
+      # Gatekeeper call the app "damaged". Checks the .app and the copy inside the .dmg that users download.
+      - name: Verify macOS signature
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+          bundle_dir=$(find apps/desktop/src-tauri/target -type d -path '*/release/bundle' | head -n1)
+          app="$bundle_dir/macos/Astra.app"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          codesign --display --verbose=2 "$app" 2>&1 | grep -E '^(Identifier|Authority|Signature|TeamIdentifier)='
+          for dmg in "$bundle_dir"/dmg/*.dmg; do
+            mnt=$(mktemp -d)
+            hdiutil attach -nobrowse -readonly -mountpoint "$mnt" "$dmg" > /dev/null
+            codesign --verify --deep --strict --verbose=2 "$mnt/Astra.app"
+            hdiutil detach "$mnt" > /dev/null
+          done
+          if [ "${ASTRA_MAC_SIGNED:-}" = "1" ] && [ -n "${APPLE_ID:-}" ]; then
+            spctl --assess --type execute --verbose=2 "$app"
+          fi
 
   android:
     name: Android

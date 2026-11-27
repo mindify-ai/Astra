@@ -129,3 +129,19 @@ pnpm --filter @astra/desktop android:init
 ```
 
 Release builds for every platform run in `.github/workflows/release.yml`.
+
+### macOS: "Astra.app is damaged and can't be opened"
+
+macOS says this when a downloaded app's bundle signature is missing or broken. Release builds are now always
+signed: with the Developer ID and notarized when the `APPLE_*` repository secrets are set
+(`APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, plus `APPLE_ID`, `APPLE_PASSWORD`
+and `APPLE_TEAM_ID` for notarization), and ad-hoc otherwise. The release job fails if `codesign --verify` rejects
+the app.
+
+An ad-hoc signed build opens after you allow it once: **System Settings → Privacy & Security → Open Anyway**.
+For a build downloaded before this fix, re-sign it locally and clear the quarantine flag:
+
+```bash
+codesign --force --deep --sign - /Applications/Astra.app
+xattr -dr com.apple.quarantine /Applications/Astra.app
+```
