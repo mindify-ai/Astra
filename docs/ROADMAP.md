@@ -33,10 +33,10 @@
 
 ## Store readiness
 
-| Platform | Needs                                                                |
-| -------- | -------------------------------------------------------------------- |
-| macOS    | Developer ID signing + notarization (secrets wired in `release.yml`) |
-| Windows  | Authenticode certificate                                             |
-| Linux    | Done (deb, rpm, AppImage)                                            |
-| iOS      | Apple team id, provisioning, App Store review                        |
-| Android  | Release keystore, Play listing                                       |
+| Platform | Needs                                                          |
+| -------- | -------------------------------------------------------------- |
+| macOS    | Developer ID + notarization secrets (ad-hoc signed until then) |
+| Windows  | Authenticode certificate                                       |
+| Linux    | Done (deb, rpm, AppImage)                                      |
+| iOS      | Apple team id, provisioning, App Store review                  |
+| Android  | Release keystore, Play listing                                 |
