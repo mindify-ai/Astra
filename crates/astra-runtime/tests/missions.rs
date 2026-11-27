@@ -537,3 +537,196 @@ async fn interrupted_agent_is_marked_and_a_message_restarts_it() {
     .await;
     assert_eq!(host.result_of(&send), Some((true, None)));
 }
+
+/// A command agent that lists the files of the directory it runs in, then says `tail`.
+fn lister(id: &str, write: &str, tail: &str) -> Entity {
+    agent(
+        id,
+        Adapter::Command {
+            command: "sh".into(),
+            args: vec![
+                "-c".into(),
+                format!(
+                    "cat > /dev/null; {write} echo \"sees: $(ls | tr '\\n' ' ')\"; echo {tail}"
+                ),
+            ],
+        },
+        CommandPolicy::Auto,
+    )
+}
+
+fn message_to(host: &TestHost, orch: &astra_runtime::Orchestrator, mission: &str, to: &str) -> Op {
+    host.command(
+        orch,
+        "p-owner",
+        Command::SendMessage {
+            mission_id: mission.into(),
+            to: Some(to.into()),
+            body: "keep going".into(),
+            side: None,
+        },
+    )
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_message_restarts_an_agent_whose_worktree_is_gone() {
+    let tmp = tempfile::tempdir().expect("tmp");
+    let repo_path = tmp.path().join("repo");
+    std::fs::create_dir_all(&repo_path).expect("mkdir");
+    git::init_repo(&repo_path, "main", &[("README.md", "# app\n")]).expect("init");
+    let mut state = State::new("ws", "p-owner");
+    for e in [
+        person("p-owner"),
+        repo(&repo_path),
+        lister("a-build", "echo A > a.txt;", "built"),
+        mission("m-1", MissionMode::Split, "astra/greeting"),
+        mission_agent("ma-1", "m-1", "a-build", Role::Builder),
+        membership("m-1", "p-owner", Access::Owner),
+    ] {
+        state.insert(e);
+    }
+    let host = TestHost::new(state);
+    let data = tmp.path().join("data");
+    let orch = orchestrator(host.clone(), &data);
+
+    // The mission has not started, so nothing was ever checked out for it: the worktree is made on demand.
+    let wt = data.join("worktrees").join("m-1").join("main");
+    let first = message_to(&host, &orch, "m-1", "ma-1");
+    wait_for(&host, "the agent answers", |s, _| {
+        (s.messages.values().any(|m| m.body.contains("built"))
+            && s.mission_agents["ma-1"].status == MissionAgentStatus::Done)
+            .then_some(())
+    })
+    .await;
+    assert_eq!(host.result_of(&first), Some((true, None)));
+    assert!(wt.join("README.md").exists());
+    assert_eq!(
+        host.state().mission_agents["ma-1"].branch.as_deref(),
+        Some("astra/greeting")
+    );
+
+    // Run it to a result, which commits a.txt on the mission branch.
+    host.command(
+        &orch,
+        "p-owner",
+        Command::StartMission {
+            mission_id: "m-1".into(),
+        },
+    );
+    wait_for(&host, "result", |s, _| {
+        s.results.contains_key("res-m-1").then_some(())
+    })
+    .await;
+
+    // Astra restarts (no session survives that) and the worktree is deleted behind its back. A message brings
+    // the worktree back on the mission branch, with the work committed there.
+    orch.shutdown();
+    let orch = orchestrator(host.clone(), &data);
+    std::fs::remove_dir_all(data.join("worktrees")).expect("delete worktrees");
+    let before = host.state().messages.len();
+    let again = message_to(&host, &orch, "m-1", "ma-1");
+    wait_for(&host, "the restarted agent answers", |s, ops| {
+        (result_in(ops, &again).is_some()
+            && s.messages.len() > before
+            && s.mission_agents["ma-1"].status == MissionAgentStatus::Done)
+            .then_some(())
+    })
+    .await;
+    assert_eq!(host.result_of(&again), Some((true, None)));
+    assert_eq!(
+        std::fs::read_to_string(wt.join("a.txt")).expect("committed work"),
+        "A\n"
+    );
+
+    // Merged: the worktrees are removed for good, and the answer says why nothing restarts.
+    let merge = host.command(
+        &orch,
+        "p-owner",
+        Command::Merge {
+            result_id: "res-m-1".into(),
+        },
+    );
+    wait_for(&host, "merged", |_, ops| result_in(ops, &merge)).await;
+    assert_eq!(host.result_of(&merge), Some((true, None)));
+    let late = message_to(&host, &orch, "m-1", "ma-1");
+    let (ok, err) = wait_for(&host, "answer", |_, ops| result_in(ops, &late)).await;
+    assert!(!ok);
+    assert_eq!(
+        err.as_deref(),
+        Some("mission m-1 is already merged; start a new mission to keep working")
+    );
+    assert!(!wt.exists());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn every_agent_of_a_race_can_be_restarted() {
+    let tmp = tempfile::tempdir().expect("tmp");
+    let repo_path = tmp.path().join("repo");
+    std::fs::create_dir_all(&repo_path).expect("mkdir");
+    git::init_repo(&repo_path, "main", &[("README.md", "# app\n")]).expect("init");
+    let mut state = State::new("ws", "p-owner");
+    for e in [
+        person("p-owner"),
+        repo(&repo_path),
+        lister("a-cmd-a", "echo A > a.txt;", "from-a"),
+        lister("a-cmd-b", "echo B > b.txt;", "from-b"),
+        lister("a-review", "", "'Pick: A'"),
+        mission("m-2", MissionMode::Race, "astra/race"),
+        mission_agent("ma-a", "m-2", "a-cmd-a", Role::Builder),
+        mission_agent("ma-b", "m-2", "a-cmd-b", Role::Builder),
+        mission_agent("ma-r", "m-2", "a-review", Role::Reviewer),
+        membership("m-2", "p-owner", Access::Owner),
+    ] {
+        state.insert(e);
+    }
+    let host = TestHost::new(state);
+    let data = tmp.path().join("data");
+    let orch = orchestrator(host.clone(), &data);
+    host.command(
+        &orch,
+        "p-owner",
+        Command::StartMission {
+            mission_id: "m-2".into(),
+        },
+    );
+    wait_for(&host, "pick task", |s, _| {
+        s.tasks
+            .values()
+            .any(|t| t.title == "Pick one of 2 results" && t.column == TaskColumn::NeedsYou)
+            .then_some(())
+    })
+    .await;
+    let said = |s: &State, ma: &str, text: &str| {
+        s.messages
+            .values()
+            .filter(|m| {
+                matches!(&m.author, Author::Agent { mission_agent_id } if mission_agent_id == ma)
+                    && m.body.contains(text)
+            })
+            .count()
+    };
+
+    // Astra restarts: no session survives that.
+    orch.shutdown();
+    let orch = orchestrator(host.clone(), &data);
+
+    // The reviewer has no branch and no git worktree of its own; it still restarts, in its own directory.
+    let review = message_to(&host, &orch, "m-2", "ma-r");
+    wait_for(&host, "the reviewer answers again", |s, _| {
+        (said(s, "ma-r", "Pick: A") == 2).then_some(())
+    })
+    .await;
+    assert_eq!(host.result_of(&review), Some((true, None)));
+    assert_eq!(said(&host.state(), "ma-r", "a.txt"), 0);
+
+    // Builder B lost its worktree: it gets it back on its own branch, not builder A's.
+    let wt_b = data.join("worktrees").join("m-2").join("B");
+    std::fs::remove_dir_all(&wt_b).expect("delete B");
+    let b = message_to(&host, &orch, "m-2", "ma-b");
+    wait_for(&host, "builder B answers again", |s, _| {
+        (said(s, "ma-b", "from-b") == 2).then_some(())
+    })
+    .await;
+    assert_eq!(host.result_of(&b), Some((true, None)));
+    assert!(wt_b.join("b.txt").exists() && !wt_b.join("a.txt").exists());
+}

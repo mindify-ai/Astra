@@ -329,7 +329,10 @@ impl Orchestrator {
                 to,
                 body,
                 side,
-            } => self.send_message(&mission_id, to.as_deref(), &body, side.as_deref(), &actor),
+            } => {
+                self.send_message(&mission_id, to.as_deref(), &body, side.as_deref(), &actor)
+                    .await
+            }
             Command::TakeSteering { mission_agent_id } => {
                 self.take_steering(&mission_agent_id, &actor)
             }
@@ -348,7 +351,9 @@ impl Orchestrator {
                 self.switch_agent(&mission_agent_id, &agent_id, &actor)
                     .await
             }
-            Command::AddAgent { mission_agent_id } => self.add_agent(&mission_agent_id, &actor),
+            Command::AddAgent { mission_agent_id } => {
+                self.add_agent(&mission_agent_id, &actor).await
+            }
             Command::RemoveAgent { mission_agent_id } => {
                 self.remove_agent(&mission_agent_id, &actor).await
             }
@@ -541,7 +546,7 @@ impl Orchestrator {
 
     // -------------------------------------------------------------------------------------- steering
 
-    fn send_message(
+    async fn send_message(
         &self,
         mission_id: &str,
         to: Option<&str>,
@@ -590,7 +595,7 @@ impl Orchestrator {
                     )]),
                 }
                 if !self.deliver(ma_id, body) {
-                    self.restart(ma, body)?;
+                    self.restart(ma, body).await?;
                 }
             }
             None => {
@@ -626,8 +631,17 @@ impl Orchestrator {
                             .into(),
                     );
                 }
+                // One that can't be restarted doesn't hold the others back.
+                let mut restarted = false;
+                let mut failure = None;
                 for ma in stopped {
-                    self.restart(ma, body)?;
+                    match self.restart(ma, body).await {
+                        Ok(()) => restarted = true,
+                        Err(e) => failure = failure.or(Some(e)),
+                    }
+                }
+                if let (false, Some(e)) = (restarted, failure) {
+                    return Err(e);
                 }
             }
         }
@@ -730,12 +744,20 @@ impl Orchestrator {
 
     /// Starts a new session for an agent that is not running (it finished, failed, or Astra restarted), in its
     /// mission worktree, with the mission brief and the message it was sent.
-    fn restart(&self, ma: MissionAgent, body: &str) -> CmdResult {
+    async fn restart(&self, ma: MissionAgent, body: &str) -> CmdResult {
         let mission = read(self.host(), |s| s.missions.get(&ma.mission_id).cloned())
             .ok_or_else(|| format!("unknown mission {}", ma.mission_id))?;
+        if mission.status == MissionStatus::Merged {
+            // Its worktrees went with the merge, and nothing done now could be merged again.
+            return Err(format!(
+                "mission {} is already merged; start a new mission to keep working",
+                mission.id
+            ));
+        }
         let worktree = self
-            .worktree_of(&ma)
-            .ok_or_else(|| format!("agent {} is not running and its worktree is gone", ma.id))?;
+            .ensure_worktree(&ma, &mission)
+            .await
+            .map_err(|e| format!("agent {} can't be restarted: {e}", ma.id))?;
         let prompt = format!(
             "{}\n\nYou were stopped and are now resumed in the same worktree. The person steering you says:\n\n{body}",
             prompt_for(ma.role, &mission, "")
@@ -758,35 +780,84 @@ impl Orchestrator {
         Ok(())
     }
 
-    /// The worktree a mission agent works in: the one on its branch (or the mission's only worktree).
-    fn worktree_of(&self, ma: &MissionAgent) -> Option<PathBuf> {
-        let dir = self
-            .inner
-            .config
-            .data_dir
-            .join("worktrees")
-            .join(sanitize(&ma.mission_id));
-        let dirs: Vec<PathBuf> = std::fs::read_dir(dir)
-            .ok()?
-            .filter_map(|e| e.ok().map(|e| e.path()))
-            .filter(|p| p.join(".git").exists())
-            .collect();
-        let on_branch = |wt: &PathBuf| -> Option<String> {
-            let git = std::fs::read_to_string(wt.join(".git")).ok()?;
-            let gitdir = PathBuf::from(git.trim().strip_prefix("gitdir:")?.trim());
-            let head = std::fs::read_to_string(gitdir.join("HEAD")).ok()?;
-            head.trim()
-                .strip_prefix("ref: refs/heads/")
-                .map(str::to_string)
+    /// The directory a mission agent works in, made again when it is not on disk: the mission stopped before
+    /// creating it, or it was deleted since. A split mission has one worktree on the mission branch; a race has
+    /// one per builder on that builder's branch, and a plain directory for everyone else (the reviewer). A new
+    /// worktree is checked out on the same branch, so it has everything committed there so far.
+    async fn ensure_worktree(
+        &self,
+        ma: &MissionAgent,
+        mission: &Mission,
+    ) -> Result<PathBuf, String> {
+        let (name, branch) = match (mission.mode, ma.role) {
+            (MissionMode::Split, _) => ("main".to_string(), mission.branch.clone()),
+            (MissionMode::Race, Role::Builder) => {
+                let label = self.race_label(ma, mission)?;
+                let branch = format!("{}-{}", mission.branch, label.to_lowercase());
+                (label, branch)
+            }
+            (MissionMode::Race, _) => {
+                let dir = self.worktree_dir(&mission.id, "review");
+                std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+                return Ok(dir);
+            }
         };
-        match &ma.branch {
-            Some(b) => dirs
-                .iter()
-                .find(|d| on_branch(d).as_deref() == Some(b.as_str()))
-                .cloned(),
-            None => None,
+        let dir = self.worktree_dir(&mission.id, &name);
+        // Still there. The agent may have moved it to another branch; it is the agent's worktree all the same.
+        if dir.join(".git").exists() {
+            return Ok(dir);
         }
-        .or_else(|| (dirs.len() == 1).then(|| dirs[0].clone()))
+        let repo = read(self.host(), |s| {
+            s.repositories
+                .get(&mission.repo_id)
+                .and_then(|r| r.path.clone())
+        })
+        .map(|p| git::expand_home(&p))
+        .ok_or_else(|| {
+            "its worktree is gone and the mission's repository has no local path on this node"
+                .to_string()
+        })?;
+        let (base, b, d) = (mission.base_branch.clone(), branch.clone(), dir);
+        let worktree =
+            blocking(move || git::create_worktree(&repo, &base, &b, &d).map_err(|e| e.to_string()))
+                .await
+                .map_err(|e| format!("its worktree is gone and could not be made again ({e})"))?;
+        tracing::info!(agent = %ma.id, %branch, "worktree made again");
+        if ma.branch.as_deref() != Some(branch.as_str()) {
+            self.emit(vec![OpBody::patch(
+                EntityKind::MissionAgent,
+                &ma.id,
+                [("branch", json!(branch))],
+            )]);
+        }
+        Ok(worktree)
+    }
+
+    /// A race builder's label (`A`, `B`, ...): the one its branch ends with, or, before it has a branch, the
+    /// one `run_race` gives it.
+    fn race_label(&self, ma: &MissionAgent, mission: &Mission) -> Result<String, String> {
+        let started = ma
+            .branch
+            .as_deref()
+            .and_then(|b| b.strip_prefix(mission.branch.as_str()))
+            .and_then(|b| b.strip_prefix('-'))
+            .filter(|l| !l.is_empty());
+        if let Some(label) = started {
+            return Ok(label.to_uppercase());
+        }
+        let mut builders: Vec<String> = read(self.host(), |s| {
+            s.mission_agents
+                .values()
+                .filter(|m| m.mission_id == mission.id && m.enabled && m.role == Role::Builder)
+                .map(|m| m.id.clone())
+                .collect()
+        });
+        builders.sort();
+        builders
+            .iter()
+            .position(|id| *id == ma.id)
+            .map(label_for)
+            .ok_or_else(|| "it is no longer a builder in this race".to_string())
     }
 
     fn deliver(&self, ma_id: &str, body: &str) -> bool {
@@ -1702,7 +1773,7 @@ impl Orchestrator {
 
     /// Starts an agent the client just put on a mission that is already under way. One added before the
     /// mission starts is picked up by `startMission`.
-    fn add_agent(&self, ma_id: &str, actor: &str) -> CmdResult {
+    async fn add_agent(&self, ma_id: &str, actor: &str) -> CmdResult {
         let ma = read(self.host(), |s| s.mission_agents.get(ma_id).cloned())
             .ok_or_else(|| format!("unknown agent {ma_id}"))?;
         let mission = self.editable_mission(&ma.mission_id, actor)?;
@@ -1714,8 +1785,9 @@ impl Orchestrator {
             return Err("a race's entrants are fixed once it starts".into());
         }
         let worktree = self
-            .worktree_of(&ma)
-            .ok_or_else(|| "the mission has no worktree to work in".to_string())?;
+            .ensure_worktree(&ma, &mission)
+            .await
+            .map_err(|e| format!("agent {} can't be started: {e}", ma.id))?;
         let prompt = prompt_for(ma.role, &mission, "");
         let o = self.clone();
         tokio::spawn(async move {

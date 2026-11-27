@@ -70,10 +70,18 @@ pub fn create_worktree(repo_path: &Path, base: &str, branch: &str, dir: &Path) -
             dir.display()
         )));
     }
-    let base_commit = repo.revparse_single(base)?.peel_to_commit()?;
+    forget_lost_worktrees(&repo, branch, dir)?;
+    // An empty directory left behind is not a worktree, and git won't create one over it.
+    if dir.is_dir() && std::fs::read_dir(dir).is_ok_and(|mut d| d.next().is_none()) {
+        std::fs::remove_dir(dir).map_err(|e| GitError::Other(e.to_string()))?;
+    }
     let br = match repo.find_branch(branch, BranchType::Local) {
         Ok(b) => b,
-        Err(_) => repo.branch(branch, &base_commit, false)?,
+        Err(_) => repo.branch(
+            branch,
+            &repo.revparse_single(base)?.peel_to_commit()?,
+            false,
+        )?,
     };
     if let Some(parent) = dir.parent() {
         std::fs::create_dir_all(parent).map_err(|e| GitError::Other(e.to_string()))?;
@@ -96,6 +104,41 @@ pub fn create_worktree(repo_path: &Path, base: &str, branch: &str, dir: &Path) -
     opts.reference(Some(&reference));
     repo.worktree(&name, dir, Some(&opts))?;
     Ok(dir.to_path_buf())
+}
+
+/// `path` with symlinks resolved as far as it exists (a lost worktree's directory doesn't).
+fn resolved(path: &Path) -> PathBuf {
+    if let Ok(p) = path.canonicalize() {
+        return p;
+    }
+    match (path.parent(), path.file_name()) {
+        (Some(parent), Some(name)) => resolved(parent).join(name),
+        _ => path.to_path_buf(),
+    }
+}
+
+/// Forgets worktrees whose directory is gone from disk (deleted by hand or by a cleanup) and that were at
+/// `dir` or on `branch`. The repository still lists them, and a listed worktree keeps its branch checked out,
+/// so the branch could not get a new one. What `git worktree prune` does, for the ones in the way.
+fn forget_lost_worktrees(repo: &Repository, branch: &str, dir: &Path) -> Result<()> {
+    let target = resolved(dir);
+    let head = format!("ref: refs/heads/{branch}");
+    for name in repo.worktrees()?.iter().flatten().flatten() {
+        let Ok(wt) = repo.find_worktree(name) else {
+            continue;
+        };
+        if wt.validate().is_ok() {
+            continue;
+        }
+        let on_branch =
+            std::fs::read_to_string(repo.commondir().join("worktrees").join(name).join("HEAD"))
+                .is_ok_and(|h| h.trim() == head);
+        if on_branch || resolved(wt.path()) == target {
+            // The default options only prune a worktree that is not valid and not locked.
+            wt.prune(None)?;
+        }
+    }
+    Ok(())
 }
 
 /// Remove the worktree checked out at `dir` (its branch is kept).
@@ -386,5 +429,34 @@ mod tests {
         remove_worktree(&repo, &a).expect("remove");
         assert!(!a.exists());
         assert!(branch_exists(&repo, "astra/x-a"));
+    }
+
+    #[test]
+    fn a_lost_worktree_is_created_again_on_its_branch() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        let repo = tmp.path().join("repo");
+        std::fs::create_dir_all(&repo).expect("mkdir");
+        init_repo(&repo, "main", &[("README.md", "hello\n")]).expect("init");
+        let dir = tmp.path().join("wt/a");
+        let a = create_worktree(&repo, "main", "astra/x", &dir).expect("wt");
+        std::fs::write(a.join("a.txt"), "A\n").expect("write");
+        commit_all(&a, "a").expect("commit");
+
+        // Deleted behind git's back: the repository still lists it, holding the branch.
+        std::fs::remove_dir_all(&a).expect("delete");
+        let again = create_worktree(&repo, "main", "astra/x", &dir).expect("wt again");
+        assert_eq!(
+            std::fs::read_to_string(again.join("a.txt")).expect("the branch's work"),
+            "A\n"
+        );
+
+        // Lost again, with an empty directory left where it was, and wanted somewhere else this time.
+        std::fs::remove_dir_all(&again).expect("delete");
+        std::fs::create_dir_all(&again).expect("empty dir");
+        let moved = tmp.path().join("elsewhere/a");
+        create_worktree(&repo, "main", "astra/x", &moved).expect("wt elsewhere");
+        assert!(moved.join("a.txt").exists());
+        // A worktree that is still there keeps its branch.
+        assert!(create_worktree(&repo, "main", "astra/x", &dir).is_err());
     }
 }
