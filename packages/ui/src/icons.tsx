@@ -99,3 +99,15 @@ export const ChatIcon = ({ size = 16, ...p }: IconProps) => (
     <path d="M4 5h16v11H9l-5 4z" />
   </svg>
 )
+/** A window with a pane docked on its right edge. */
+export const DockIcon = ({ size = 16, ...p }: IconProps) => (
+  <svg {...stroke(size, p)}>
+    <path d="M3 5h18v14H3zM14 5v14" />
+  </svg>
+)
+/** A small window floating over a larger one. */
+export const PopOutIcon = ({ size = 16, ...p }: IconProps) => (
+  <svg {...stroke(size, p)}>
+    <path d="M21 10V5H3v14h7M13 13h8v6h-8z" />
+  </svg>
+)

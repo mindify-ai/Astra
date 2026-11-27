@@ -32,6 +32,7 @@ import { Review } from './screens/Review'
 import { Thread } from './screens/Thread'
 import { Welcome } from './screens/Welcome'
 import { CommandPalette } from './shell/CommandPalette'
+import { MiniBrowser } from './shell/MiniBrowser'
 import { WithTerminal } from './shell/Terminal'
 
 const rootRoute = createRootRoute({
@@ -40,6 +41,7 @@ const rootRoute = createRootRoute({
       <WithTerminal>
         <Outlet />
       </WithTerminal>
+      <MiniBrowser />
       <PeopleDialog />
       <CommandPalette />
     </>

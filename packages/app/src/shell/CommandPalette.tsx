@@ -50,7 +50,7 @@ export function CommandPalette() {
   const ui = useUi()
   const host = useHost()
   const s = useAstraState()
-  const { platform } = usePlatform()
+  const { platform, layout } = usePlatform()
   const navigate = useNavigate()
   const ref = useRef<HTMLDialogElement>(null)
   const input = useRef<HTMLInputElement>(null)
@@ -184,16 +184,34 @@ export function CommandPalette() {
         keywords: 'shell console',
         run: () => ui.setTerminalOpen(!ui.terminalOpen),
       })
-    out.push({
-      id: 'browser',
-      group: 'Actions',
-      label: 'Open browser',
-      keywords: 'preview localhost web page workbench layout',
-      run: () => {
-        ui.setLayout((l) => ({ ...l, browser: { ...l.browser, open: true } }))
-        go('/code')()
+    if (layout === 'desktop')
+      out.push({
+        id: 'mini-browser',
+        group: 'Actions',
+        label: ui.miniBrowserOpen ? 'Hide mini browser' : 'Open mini browser',
+        keywords: 'preview localhost web page floating window picture',
+        run: () => ui.setMiniBrowserOpen(!ui.miniBrowserOpen),
+      })
+    out.push(
+      {
+        id: 'browser',
+        group: 'Actions',
+        label: 'Open browser beside the code',
+        keywords: 'preview localhost web page workbench layout dock',
+        run: () => {
+          ui.setLayout((l) => ({ ...l, browser: { ...l.browser, open: true } }))
+          go('/code')()
+        },
       },
-    })
+      {
+        id: 'browser-isolated',
+        group: 'Actions',
+        label: ui.browserIsolated ? 'Turn off the isolated sandbox' : 'Turn on the isolated sandbox',
+        hint: ui.browserIsolated ? 'ISOLATED' : undefined,
+        keywords: 'browser sandbox isolate private cookies storage security',
+        run: () => ui.setBrowserIsolated(!ui.browserIsolated),
+      },
+    )
     if (cm)
       out.push(
         {
@@ -252,7 +270,7 @@ export function CommandPalette() {
     }
     if (host.signOut) out.push({ id: 'signout', group: 'Actions', label: 'Sign out', run: host.signOut })
     return out
-  }, [s, ui, host, query, navigate])
+  }, [s, ui, host, layout, query, navigate])
 
   const results = useMemo(() => {
     const terms = query.toLowerCase().split(/\s+/).filter(Boolean)
