@@ -180,6 +180,12 @@ interface UiState {
   setPaletteOpen: (open: boolean) => void
   layout: WorkbenchLayout
   setLayout: (update: (l: WorkbenchLayout) => WorkbenchLayout) => void
+  /** The floating mini browser (desktop layouts, every screen). */
+  miniBrowserOpen: boolean
+  setMiniBrowserOpen: (open: boolean) => void
+  /** Runs the in-app browser's pages in the isolated sandbox; kept per device. */
+  browserIsolated: boolean
+  setBrowserIsolated: (isolated: boolean) => void
   /** The side-chat panel on the thread screen. */
   sideOpen: boolean
   setSideOpen: (open: boolean) => void
@@ -253,6 +259,12 @@ export function AstraProvider({
       return next
     })
   }, [])
+  const [miniBrowserOpen, setMiniBrowserOpen] = useState(false)
+  const [browserIsolated, setIsolatedState] = useState(() => read('astra.browser.isolated') === 'on')
+  const setBrowserIsolated = useCallback((isolated: boolean) => {
+    setIsolatedState(isolated)
+    write('astra.browser.isolated', isolated ? 'on' : 'off')
+  }, [])
   const [sideOpen, setSideOpenState] = useState(() => read('astra.side') === 'open')
   const setSideOpen = useCallback((open: boolean) => {
     setSideOpenState(open)
@@ -283,6 +295,10 @@ export function AstraProvider({
       setPaletteOpen,
       layout,
       setLayout,
+      miniBrowserOpen,
+      setMiniBrowserOpen,
+      browserIsolated,
+      setBrowserIsolated,
       sideOpen,
       setSideOpen,
       sideThreads,
@@ -296,6 +312,9 @@ export function AstraProvider({
       paletteOpen,
       layout,
       setLayout,
+      miniBrowserOpen,
+      browserIsolated,
+      setBrowserIsolated,
       sideOpen,
       setSideOpen,
       sideThreads,

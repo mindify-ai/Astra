@@ -50,8 +50,16 @@ for (const platform of process.env.PLATFORMS?.split(',') ?? ['mac']) {
     await page.screenshot({ path: `${out}/desktop-${platform}-${name}.png`, fullPage: true })
   }
   await page.goto(`${base}/missions/m-014?platform=${platform}&instant`)
-  await page.getByRole('button', { name: 'SHARE' }).click()
-  await page.screenshot({ path: `${out}/desktop-${platform}-11-people.png` })
+  // SHARE is behind a feature flag (packages/app/src/features.ts); the people panel is shot only when it is on.
+  const share = page.getByRole('button', { name: 'SHARE' })
+  if ((await share.count()) > 0) {
+    await share.click()
+    await page.screenshot({ path: `${out}/desktop-${platform}-11-people.png` })
+  }
+  await page.goto(`${base}/missions/m-014?platform=${platform}&instant`)
+  await page.getByRole('button', { name: 'Mini browser' }).click()
+  await page.getByRole('button', { name: 'Isolated sandbox' }).click()
+  await page.screenshot({ path: `${out}/desktop-${platform}-12-mini-browser.png` })
   await page.close()
 }
 for (const platform of ['ios', 'android']) {

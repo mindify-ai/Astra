@@ -11,7 +11,7 @@ type PaneId = 'chat' | 'browser'
  * panes on one side stack, with a draggable split between them. Column widths and splits are remembered.
  */
 export function Workbench({ children }: { children: ReactNode }) {
-  const { layout, setLayout } = useUi()
+  const { layout, setLayout, setMiniBrowserOpen } = useUi()
   const hide = (id: PaneId) => setLayout((l) => ({ ...l, [id]: { ...l[id], open: false } }))
   const panesOn = (side: Side): PaneId[] =>
     (['chat', 'browser'] as const).filter((id) => layout[id].open && layout[id].side === side)
@@ -19,7 +19,14 @@ export function Workbench({ children }: { children: ReactNode }) {
     id === 'chat' ? (
       <MissionChatPane onClose={() => hide('chat')} className="min-h-0 grow" />
     ) : (
-      <BrowserPane onClose={() => hide('browser')} className="min-h-0 grow" />
+      <BrowserPane
+        onClose={() => hide('browser')}
+        onPopOut={() => {
+          hide('browser')
+          setMiniBrowserOpen(true)
+        }}
+        className="min-h-0 grow"
+      />
     )
   const left = panesOn('left')
   const right = panesOn('right')

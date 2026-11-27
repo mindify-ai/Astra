@@ -143,6 +143,13 @@ connects the agent with its own keys. A mission runs on the node of its first en
 - **Agent sandboxing.** Agent file access is confined to its worktree, and commands follow the approval policy.
 - **Tauri.** The webview's capabilities are limited to window controls, the OS info read, the folder picker,
   clipboard writes, bringing its window to the front, and opening `https://github.com/*` pages in the default browser (for sign-in). Files, processes and the network go through the Rust core.
+- **In-app browser.** The workbench's browser pane and the floating mini browser load pages in a sandboxed
+  iframe that can never navigate or read the app. A page from the app's own origin never keeps that origin, so it
+  can't reach the app's storage or session. The **isolated sandbox** (the `ISOLATED` toggle, kept per device)
+  takes the origin away from every page: an opaque origin with no cookies, storage or service workers, and no
+  pop-ups, dialogs or downloads. On Chromium engines the frame is also `credentialless`, so the page loads without
+  the cookies its site already has. Pages that need their own origin (most sign-ins, dev servers that check
+  `Origin`) need it off.
 - **Relay.** The relay authenticates with JWT (GitHub OAuth redirect flow, or the device flow without a client secret, from the web or the desktop app; the relay also speaks GitLab's device flow, which the apps don't offer for now). It keeps the OAuth client secret, sends browsers back only to allowed origins or loopback, and hands out a one-time code that only the app holding the PKCE verifier can trade in
   and enforces workspace membership. It stores ops (messages, diffs, statuses), not repositories.
 - **LAN pairing.** It uses a one-time code from a QR scan.

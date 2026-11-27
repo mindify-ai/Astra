@@ -1,5 +1,5 @@
 import { demoSeed, MockClient } from '@astra/client'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { AstraApp } from '../src'
@@ -7,6 +7,7 @@ import type { HostCapabilities } from '../src/context'
 import { normalizeUrl, sandboxFor } from '../src/shared/browser'
 import { activeToken, commandsFor, harnessOf, rank, sideQuestion } from '../src/shared/harness'
 import { messagesOf, sideMessagesOf } from '../src/shared/thread'
+import { fitRect, resizeRect } from '../src/shell/MiniBrowser'
 
 const options = () => within(screen.getByRole('listbox')).getAllByRole('option')
 
@@ -183,6 +184,163 @@ describe('workbench layout', () => {
   })
 })
 
+describe('mini browser', () => {
+  const rectOf = (el: HTMLElement) => ({
+    x: Number.parseInt(el.style.left, 10),
+    y: Number.parseInt(el.style.top, 10),
+    w: Number.parseInt(el.style.width, 10),
+    h: Number.parseInt(el.style.height, 10),
+  })
+
+  it('floats over any screen and stays open between them', async () => {
+    mount('/board')
+    const user = userEvent.setup()
+    const toggle = await screen.findByRole('button', { name: 'Mini browser' })
+    expect(toggle.getAttribute('aria-pressed')).toBe('false')
+    expect(screen.queryByRole('region', { name: 'Mini browser' })).toBeNull()
+
+    await user.click(toggle)
+    const mini = screen.getByRole('region', { name: 'Mini browser' })
+    expect(toggle.getAttribute('aria-pressed')).toBe('true')
+    // It opens in the bottom-right corner, inside the window.
+    const r = rectOf(mini)
+    expect(r.x + r.w).toBeLessThan(window.innerWidth)
+    expect(r.y + r.h).toBeLessThan(window.innerHeight)
+
+    await user.type(within(mini).getByRole('textbox', { name: 'Address' }), '3000{Enter}')
+    expect(within(mini).getByTitle('Browser: http://localhost:3000/')).toBeTruthy()
+
+    // Another screen: the same window, with the page still in it.
+    await user.click(screen.getByRole('link', { name: 'GIT' }))
+    await screen.findByRole('link', { name: 'GIT', current: 'page' })
+    expect(screen.getByRole('region', { name: 'Mini browser' })).toBe(mini)
+    expect(within(mini).getByTitle('Browser: http://localhost:3000/')).toBeTruthy()
+
+    await user.click(within(mini).getByRole('button', { name: 'Close mini browser' }))
+    expect(screen.queryByRole('region', { name: 'Mini browser' })).toBeNull()
+  })
+
+  it('runs pages in the isolated sandbox when it is turned on, and remembers that', async () => {
+    mount('/board')
+    const user = userEvent.setup()
+    await user.click(await screen.findByRole('button', { name: 'Mini browser' }))
+    const mini = screen.getByRole('region', { name: 'Mini browser' })
+    await user.type(within(mini).getByRole('textbox', { name: 'Address' }), 'example.com{Enter}')
+    const frame = () => within(mini).getByTitle('Browser: https://example.com/') as HTMLIFrameElement
+    const open = frame()
+    expect(open.getAttribute('sandbox')).toContain('allow-same-origin')
+    expect(open.hasAttribute('credentialless')).toBe(false)
+
+    const isolate = within(mini).getByRole('button', { name: 'Isolated sandbox' })
+    expect(isolate.getAttribute('aria-pressed')).toBe('false')
+    await user.click(isolate)
+    expect(isolate.getAttribute('aria-pressed')).toBe('true')
+    // The sandbox applies as a page loads: the page is loaded again in a new frame.
+    expect(frame()).not.toBe(open)
+    expect(frame().getAttribute('sandbox')).toBe('allow-scripts allow-forms')
+    expect(frame().hasAttribute('credentialless')).toBe(true)
+    expect(frame().getAttribute('src')).toBe('https://example.com/')
+    expect(window.localStorage.getItem('astra.browser.isolated')).toBe('on')
+
+    await user.click(isolate)
+    expect(frame().getAttribute('sandbox')).toContain('allow-same-origin')
+    expect(frame().hasAttribute('credentialless')).toBe(false)
+    expect(window.localStorage.getItem('astra.browser.isolated')).toBe('off')
+  })
+
+  it('starts isolated when that was left on, in the workbench pane too', async () => {
+    window.localStorage.setItem('astra.browser.isolated', 'on')
+    window.localStorage.setItem('astra.browser.url', 'http://localhost:3000/')
+    window.localStorage.setItem(
+      'astra.layout',
+      JSON.stringify({ chat: { open: false, side: 'left' }, browser: { open: true, side: 'right' } }),
+    )
+    mount('/code')
+    const pane = await screen.findByRole('region', { name: 'Browser' })
+    expect(within(pane).getByRole('button', { name: 'Isolated sandbox' }).getAttribute('aria-pressed')).toBe(
+      'true',
+    )
+    expect(within(pane).getByTitle('Browser: http://localhost:3000/').getAttribute('sandbox')).toBe(
+      'allow-scripts allow-forms',
+    )
+  })
+
+  it('moves and resizes, by dragging or from the keyboard, and remembers where it sits', async () => {
+    mount('/board')
+    const user = userEvent.setup()
+    await user.click(await screen.findByRole('button', { name: 'Mini browser' }))
+    const mini = screen.getByRole('region', { name: 'Mini browser' })
+    const start = rectOf(mini)
+    const handle = within(mini).getByRole('button', { name: 'Move mini browser' })
+
+    fireEvent.pointerDown(handle, { button: 0, clientX: 500, clientY: 500 })
+    fireEvent.pointerMove(handle, { clientX: 400, clientY: 440 })
+    fireEvent.pointerUp(handle)
+    expect(rectOf(mini)).toEqual({ ...start, x: start.x - 100, y: start.y - 60 })
+    expect(JSON.parse(window.localStorage.getItem('astra.browser.mini') ?? 'null')).toEqual(rectOf(mini))
+
+    // Dragging the top-left corner grows it up and to the left; the opposite corner stays put.
+    const corner = mini.querySelector('[data-grip="nw"]') as HTMLElement
+    const before = rectOf(mini)
+    fireEvent.pointerDown(corner, { button: 0, clientX: before.x, clientY: before.y })
+    fireEvent.pointerMove(corner, { clientX: before.x - 40, clientY: before.y - 20 })
+    fireEvent.pointerUp(corner)
+    expect(rectOf(mini)).toEqual({ x: before.x - 40, y: before.y - 20, w: before.w + 40, h: before.h + 20 })
+
+    handle.focus()
+    const dragged = rectOf(mini)
+    await user.keyboard('{ArrowLeft}{ArrowUp}')
+    expect(rectOf(mini)).toEqual({ ...dragged, x: dragged.x - 16, y: dragged.y - 16 })
+    await user.keyboard('{Shift>}{ArrowLeft}{ArrowUp}{/Shift}')
+    expect(rectOf(mini)).toMatchObject({ w: dragged.w - 16, h: dragged.h - 16 })
+
+    await user.dblClick(handle)
+    expect(rectOf(mini)).toEqual(start)
+    expect(window.localStorage.getItem('astra.browser.mini')).toBeNull()
+  })
+
+  it('pops out of the workbench and docks back beside the code', async () => {
+    mount('/code')
+    const user = userEvent.setup()
+    await user.click(await screen.findByRole('button', { name: 'LAYOUT' }))
+    await user.click(screen.getByRole('menuitem', { name: 'Code · browser' }))
+    const pane = screen.getByRole('region', { name: 'Browser' })
+    await user.type(within(pane).getByRole('textbox', { name: 'Address' }), 'localhost:8080{Enter}')
+
+    await user.click(within(pane).getByRole('button', { name: 'Pop out to the mini browser' }))
+    expect(screen.queryByRole('region', { name: 'Browser' })).toBeNull()
+    const mini = screen.getByRole('region', { name: 'Mini browser' })
+    // The page comes along.
+    expect(within(mini).getByTitle('Browser: http://localhost:8080/')).toBeTruthy()
+
+    await user.click(within(mini).getByRole('button', { name: 'Dock beside the code' }))
+    expect(screen.queryByRole('region', { name: 'Mini browser' })).toBeNull()
+    const docked = await screen.findByRole('region', { name: 'Browser' })
+    expect(within(docked).getByTitle('Browser: http://localhost:8080/')).toBeTruthy()
+  })
+
+  it('opens from the command palette, which also switches the sandbox', async () => {
+    mount('/board')
+    const user = userEvent.setup()
+    await user.click(await screen.findByRole('button', { name: 'Command palette' }))
+    await user.keyboard('mini browser{Enter}')
+    const mini = await screen.findByRole('region', { name: 'Mini browser' })
+    const isolate = within(mini).getByRole('button', { name: 'Isolated sandbox' })
+    expect(isolate.getAttribute('aria-pressed')).toBe('false')
+
+    await user.click(screen.getByRole('button', { name: 'Command palette' }))
+    await user.keyboard('isolated sandbox{Enter}')
+    await waitFor(() => expect(isolate.getAttribute('aria-pressed')).toBe('true'))
+  })
+
+  it('has no place on phones', async () => {
+    const client = new MockClient({ seed: demoSeed, latency: 0 })
+    render(<AstraApp client={client} platform="ios" history={{ memory: '/' }} />)
+    await screen.findByRole('navigation')
+    expect(screen.queryByRole('button', { name: 'Mini browser' })).toBeNull()
+  })
+})
+
 describe('helpers', () => {
   it('normalizes browser addresses', () => {
     expect(normalizeUrl('localhost:3000')).toBe('http://localhost:3000/')
@@ -198,6 +356,27 @@ describe('helpers', () => {
   it('never lets a same-origin page lift its sandbox', () => {
     expect(sandboxFor(`${window.location.origin}/`)).not.toContain('allow-same-origin')
     expect(sandboxFor('http://localhost:3999/')).toContain('allow-same-origin')
+  })
+
+  it('gives an isolated page no origin, windows, dialogs or downloads', () => {
+    for (const url of ['http://localhost:3999/', 'https://example.com/', `${window.location.origin}/`])
+      expect(sandboxFor(url, true)).toBe('allow-scripts allow-forms')
+  })
+
+  it('keeps the mini browser inside the window', () => {
+    const vp = { w: 1000, h: 700 }
+    // Too small and off-screen: at least the minimum size, pulled back inside the margin.
+    expect(fitRect({ x: -50, y: 900, w: 100, h: 100 }, vp)).toEqual({ x: 8, y: 452, w: 320, h: 240 })
+    // Larger than the window: as large as fits.
+    expect(fitRect({ x: 0, y: 0, w: 4000, h: 4000 }, vp)).toEqual({ x: 8, y: 8, w: 984, h: 684 })
+
+    const from = { x: 500, y: 300, w: 400, h: 300 }
+    expect(resizeRect(from, 'se', 50, 40, vp)).toEqual({ x: 500, y: 300, w: 450, h: 340 })
+    expect(resizeRect(from, 'nw', -50, -40, vp)).toEqual({ x: 450, y: 260, w: 450, h: 340 })
+    // An edge stops at the window's margin and at the minimum size; the far edge never moves.
+    expect(resizeRect(from, 'e', 900, 0, vp)).toEqual({ x: 500, y: 300, w: 492, h: 300 })
+    expect(resizeRect(from, 'w', 900, 0, vp)).toEqual({ x: 580, y: 300, w: 320, h: 300 })
+    expect(resizeRect(from, 'n', 0, -900, vp)).toEqual({ x: 500, y: 8, w: 400, h: 592 })
   })
 
   it('finds the token at the caret', () => {

@@ -6,6 +6,7 @@ import { useAstraState, useConnectivity, useHost, usePlatform, useUi } from '../
 import { features } from '../features'
 import { currentMissionId } from '../select'
 import { PaletteButton } from './CommandPalette'
+import { BrowserButton } from './MiniBrowser'
 import { TerminalButton } from './Terminal'
 
 export type View = 'thread' | 'map' | 'board' | 'git'
@@ -79,17 +80,17 @@ function AppMenu() {
           <Link role="menuitem" to="/code" className={item} onClick={() => setOpen(false)}>
             Code editor
           </Link>
-          <Link
+          <button
+            type="button"
             role="menuitem"
-            to="/code"
-            className={item}
+            className={`${item} w-full border-0 bg-transparent text-left`}
             onClick={() => {
               setOpen(false)
-              ui.setLayout((l) => ({ ...l, browser: { ...l.browser, open: true } }))
+              ui.setMiniBrowserOpen(true)
             }}
           >
-            Browser
-          </Link>
+            Mini browser
+          </button>
           {host.terminal ? (
             <button
               type="button"
@@ -134,7 +135,7 @@ function AppMenu() {
 }
 
 export function AppHeader({ repoSelect, nav, step, byline, people, actions, border = true }: AppHeaderProps) {
-  const { windowControls, windowActions, platform } = usePlatform()
+  const { windowControls, windowActions, platform, layout } = usePlatform()
   const state = useAstraState()
   const ui = useUi()
   const online = useConnectivity().online
@@ -236,7 +237,10 @@ export function AppHeader({ repoSelect, nav, step, byline, people, actions, bord
       ) : null}
       {byline ? <Spec>{byline}</Spec> : null}
       {people && people.length > 0 ? <AvatarStack people={people} /> : null}
-      <PaletteButton />
+      <div className="flex items-center gap-2">
+        <PaletteButton />
+        {repos.length > 0 && layout === 'desktop' ? <BrowserButton /> : null}
+      </div>
       {repos.length > 0 ? (
         <Link to="/code" title="Code editor" className={buttonClass('text', 'sm')}>
           CODE
