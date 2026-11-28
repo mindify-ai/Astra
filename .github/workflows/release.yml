@@ -68,9 +68,15 @@ jobs:
           tagName: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
           releaseName: Astra ${{ github.ref_name }}
           releaseBody: |
-            **macOS:** if this build isn't notarized yet, macOS says Apple can't verify Astra the first time you open it.
-            Open **System Settings → Privacy & Security** and click **Open Anyway** (or run
-            `xattr -dr com.apple.quarantine /Applications/Astra.app` once).
+            **Install on a Mac with Apple silicon** (one line, no security prompt):
+
+            ```bash
+            curl -fsSL https://astra.mindifyai.dev/install.sh | sh
+            ```
+
+            If you download the `.dmg` in a browser instead and this build isn't notarized yet, macOS says Apple can't
+            verify Astra the first time you open it. Open **System Settings → Privacy & Security** and click
+            **Open Anyway** (or run `xattr -dr com.apple.quarantine /Applications/Astra.app` once).
           releaseDraft: true
       # Fail the job (the release stays a draft) if the bundle's signature is broken, which is what makes
       # Gatekeeper call the app "damaged". Checks the .app and the copy inside the .dmg that users download.
