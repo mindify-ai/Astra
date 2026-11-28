@@ -138,8 +138,15 @@ signed: with the Developer ID and notarized when the `APPLE_*` repository secret
 and `APPLE_TEAM_ID` for notarization), and ad-hoc otherwise. The release job fails if `codesign --verify` rejects
 the app.
 
-An ad-hoc signed build opens after you allow it once: **System Settings → Privacy & Security → Open Anyway**.
-For a build downloaded before this fix, re-sign it locally and clear the quarantine flag:
+The quickest way to install is the one-line installer from the landing page. It downloads with curl, which
+doesn't quarantine the app, so macOS opens it without a prompt (and it repairs builds made before this fix):
+
+```bash
+curl -fsSL https://astra.mindifyai.dev/install.sh | sh
+```
+
+A `.dmg` downloaded in a browser and ad-hoc signed opens after you allow it once: **System Settings → Privacy &
+Security → Open Anyway**. For a build downloaded before this fix, re-sign it locally and clear the quarantine flag:
 
 ```bash
 codesign --force --deep --sign - /Applications/Astra.app
